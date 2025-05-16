@@ -1,0 +1,6 @@
+patterns:
+  - "00-30-de"
+  - "00-30-DE"
+  - "wago-"
+  - "mqtt-broker"
+  - "x-"

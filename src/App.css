@@ -1,0 +1,50 @@
+/* App.css */
+
+/* Card styling */
+.card {
+  height: 100%; /* Ensures cards take full height for consistent layout */
+}
+
+/* Chat container styling */
+.chat-container {
+  max-height: 300px; /* Limits height, adjustable as needed */
+  overflow-y: auto; /* Enables vertical scrolling for overflow content */
+  padding: 10px; /* Adds internal spacing */
+  border: 1px solid #d3d7da; /* Light gray border for definition */
+  border-radius: 4px; /* Rounded corners for a polished look */
+  background-color: #f9f9f9; /* Light background for contrast */
+  display: flex; /* Flexbox for layout control */
+  flex-direction: column; /* Stacks messages vertically */
+  width: 100%; /* Takes full available width */
+}
+
+/* Error message styling */
+.error-message {
+  color: red; /* Red color for error visibility */
+  margin-top: 10px; /* Spacing above the error message */
+  font-size: 0.9rem; /* Slightly smaller text for emphasis */
+}
+
+/* Audio visualizer styling */
+.audio-visualizer {
+  border: 1px solid #d3d7da; /* Light gray border for separation */
+  border-radius: 4px; /* Rounded corners for consistency */
+}
+
+.netron-viewer {
+  overflow: auto;
+}
+
+/* Or directly include */
+iframe#label-studio-iframe {
+  width: 100%;
+  height: 800px;
+  position: relative;
+  overflow: hidden;
+}
+
+iframe#label-studio-iframe * {
+  position: relative !important;
+  max-width: 100% !important;
+  max-height: 100% !important;
+}

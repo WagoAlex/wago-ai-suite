@@ -1,0 +1,73 @@
+services:
+  wago-ai-suite:
+    image: wagoalex/wago-ai-suite-ui:latest
+    container_name: wago-ai-suite
+    ports:
+      - "443:443"
+    volumes:
+      - /docker/tests:/app
+      - /etc/docker/certs:/etc/docker/certs
+    environment:
+      - REACT_APP_MQTT_BROKER_URL=${REACT_APP_MQTT_BROKER_URL}
+      - REACT_APP_MQTT_START_TOPIC=${REACT_APP_MQTT_START_TOPIC}
+      - REACT_APP_N8N_API_URL=${REACT_APP_N8N_API_URL}
+      - REACT_APP_N8N_REST_API_KEY=${REACT_APP_N8N_REST_API_KEY}
+      - SERVER_NAME=${SERVER_NAME}
+      - INFERENCE_URL=${INFERENCE_URL}
+    depends_on:
+      - wago-ai-suite-backend
+      - wago-label-studio
+    networks:
+      - waa_cm_network
+
+  wago-ai-suite-backend:
+    image: wagoalex/wago-ai-suite-backend:latest
+    container_name: wago-ai-suite-backend
+    ports:
+      - "3042:3042"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./backend/ssl:/app/ssl
+      - /docker/tests:/app/audio 
+      - /etc/docker/certs:/etc/docker/certs
+    environment:
+      - API_KEY=${API_KEY}
+      - INFERENCE_URL=${INFERENCE_URL}
+    networks:
+      - waa_cm_network
+
+  wago-label-studio:
+    image: heartexlabs/label-studio:latest
+    container_name: wago-label-studio
+    environment:
+      - LABEL_STUDIO_HOST=https://192.168.2.165/labelstudio
+      - STATIC_URL=/static/
+      - CSRF_TRUSTED_ORIGINS=https://192.168.2.165,https://192.168.2.165/labelstudio
+      - DJANGO_CSRF_COOKIE_SECURE=false
+      - DJANGO_SECURE_SSL_REDIRECT=false
+      - DJANGO_SESSION_COOKIE_SECURE=false
+      - DJANGO_SESSION_COOKIE_PATH=/labelstudio
+      - DJANGO_CSRF_COOKIE_PATH=/labelstudio
+      - DJANGO_SESSION_COOKIE_SAMESITE=None
+      - DJANGO_CSRF_COOKIE_SAMESITE=None
+      - LABEL_STUDIO_USERNAME=admin
+      - LABEL_STUDIO_PASSWORD=wago
+      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
+      - LABEL_STUDIO_CSP_DIRECTIVES=default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; frame-src *; img-src * data:; connect-src *; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'
+      - DEBUG=true
+      - ALLOWED_HOSTS=*
+      - DJANGO_USE_X_FORWARDED_HOST=true
+      - DJANGO_FORCE_SCRIPT_NAME=/labelstudio
+    ports:
+      - "8080:8080"
+    volumes:
+      - /docker/labelstudio/data:/label-studio/data
+    networks:
+      - waa_cm_network
+
+volumes:
+  wago-label-studio-data:
+
+networks:
+  waa_cm_network:
+    external: true

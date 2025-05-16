@@ -1,0 +1,70 @@
+:root {
+	/* Colors for User Interaction (WAGO CI Green) */
+	--chat--color-primary: #6ec800;           /* WAGO Green (RGB: 110, 200, 0) for primary user elements like buttons */
+	--chat--color-primary-shade-50: #5aa700;  /* WAGO Green hover shade (RGB: 90, 167, 0) for interactive states */
+	--chat--color-primary-shade-100: #4c8f00; /* WAGO Green darker shade (RGB: 76, 143, 0) for active/pressed states */
+
+	/* Neutral Colors (unchanged, used for both user and chatbot) */
+	--chat--color-secondary: #d3d7da;         /* Light gray (RGB: 211, 215, 218) for secondary elements like borders */
+	--chat--color-secondary-shade-50: #c2c5cc;/* Slightly darker gray (RGB: 194, 197, 204) for subtle contrasts */
+	--chat--color-white: #ffffff;             /* White (RGB: 255, 255, 255) for backgrounds and text */
+	--chat--color-light: #f2f4f8;             /* Light neutral gray (RGB: 242, 244, 248) for backgrounds */
+	--chat--color-light-shade-50: #e6e9f1;    /* Slightly darker light gray (RGB: 230, 233, 241) for depth */
+	--chat--color-light-shade-100: #c2c5cc;   /* Matches secondary shade (RGB: 194, 197, 204) for consistency */
+	--chat--color-medium: #d2d4d9;            /* Medium gray (RGB: 210, 212, 217) close to secondary */
+	--chat--color-dark: #333333;              /* Dark gray (RGB: 51, 51, 51) for primary text */
+	--chat--color-disabled: #666666;          /* Medium gray (RGB: 102, 102, 102) for disabled states */
+	--chat--color-typing: #404040;            /* Darker gray (RGB: 64, 64, 64) for typing indicators */
+
+	/* Colors for Chatbot (Turquoise) */
+	--chat--color-response: #00A896;          /* Turquoise (RGB: 0, 168, 150) for chatbot responses */
+	--chat--color-response-shade-50: #009383; /* Slightly darker turquoise (RGB: 0, 147, 131) for hover states */
+	--chat--color-response-shade-100: #007d6f;/* Darker turquoise (RGB: 0, 125, 111) for active/contrast states */
+
+	/* Spacing and Layout */
+	--chat--spacing: 1rem;                    /* Standard spacing unit (16px) */
+	--chat--border-radius: 8px;               /* Consistent border radius for buttons and messages */
+	--chat--transition-duration: 0.15s;       /* Quick transition for smooth interactions */
+
+	/* Window Dimensions */
+	--chat--window--width: 400px;             /* Chat window width */
+	--chat--window--height: 600px;            /* Chat window height */
+
+	/* Header */
+	--chat--header-height: auto;              /* Flexible header height */
+	--chat--header--padding: var(--chat--spacing); /* 1rem padding */
+	--chat--header--background: #ffffff;      /* White (RGB: 255, 255, 255) for header background */
+	--chat--header--color: #333333;           /* Dark gray (RGB: 51, 51, 51) for header text */
+	--chat--header--border-top: none;         /* No top border */
+	--chat--header--border-bottom: 1px solid #d3d7da; /* Light gray (RGB: 211, 215, 218) border */
+	--chat--heading--font-size: 1.25rem;      /* 20px for heading */
+	--chat--subtitle--font-size: inherit;     /* Inherits parent font size */
+	--chat--subtitle--line-height: 1.8;       /* Line height for readability */
+
+	/* Textarea */
+	--chat--textarea--height: 50px;           /* Fixed height for input area */
+
+	/* Messages */
+	--chat--message--font-size: 1rem;         /* 16px for message text */
+	--chat--message--padding: var(--chat--spacing); /* 1rem padding */
+	--chat--message--border-radius: var(--chat--border-radius); /* 8px radius */
+	--chat--message-line-height: 1.8;         /* Line height for readability */
+	--chat--message--bot--background: #ffffff; /* White (RGB: 255, 255, 255) for bot message background */
+	--chat--message--bot--color: #333333;     /* Dark gray (RGB: 51, 51, 51) for bot message text */
+	--chat--message--bot--border: 1px solid #d3d7da; /* Light gray (RGB: 211, 215, 218) border */
+	--chat--message--user--background: #6ec800; /* WAGO Green (RGB: 110, 200, 0) for user message background */
+	--chat--message--user--color: #ffffff;    /* White (RGB: 255, 255, 255) for user message text */
+	--chat--message--user--border: none;      /* No border for user messages */
+	--chat--message--pre--background: rgba(0, 0, 0, 0.05); /* Light black (5% opacity) for preformatted text */
+	--chat--message--response--background: #00A896; /* Turquoise (RGB: 0, 168, 150) for chatbot response background */
+	--chat--message--response--color: #ffffff; /* White (RGB: 255, 255, 255) for chatbot response text */
+	--chat--message--response--border: none;  /* No border for chatbot responses */
+	--chat--message--response--hover--background: #009383; /* Darker turquoise (RGB: 0, 147, 131) for hover effect */
+
+	/* Toggle Button */
+	--chat--toggle--background: #6ec800;      /* WAGO Green (RGB: 110, 200, 0) for toggle button */
+	--chat--toggle--hover--background: #5aa700; /* WAGO Green hover (RGB: 90, 167, 0) for toggle hover */
+	--chat--toggle--active--background: #4c8f00; /* WAGO Green active (RGB: 76, 143, 0) for toggle active */
+	--chat--toggle--color: #ffffff;           /* White (RGB: 255, 255, 255) for toggle text/icon */
+	--chat--toggle--size: 64px;               /* Size of toggle button */
+}

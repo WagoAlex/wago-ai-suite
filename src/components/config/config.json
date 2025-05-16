@@ -1,0 +1,8 @@
+{
+  "brokerUrl": "mqtt://mqtt-broker:1883",
+  "startTopic": "agent/audio/start",
+  "webhookUrls": [
+    "http://localhost:5678/webhook-test/invoke_n8n_agent",
+    "http://localhost:5678/webhook-test/invoke_another_agent"
+  ]
+}

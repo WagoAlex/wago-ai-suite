@@ -1,0 +1,74 @@
+/* /usr/share/nginx/html/netron/grapher.css */
+
+/* Base styles aligned with WAGO CI */
+body {
+  background-color: #f5f5f5; /* Slightly off-white for better contrast */
+  color: #333333; /* WAGO text.primary */
+  font-family: 'DIN Next Pro', 'Roboto', sans-serif;
+}
+
+/* Graph container */
+.grapher {
+  background-color: #ffffff; /* White background for the graph */
+  border: 1px solid #d3d7da; /* WAGO secondary.main */
+  border-radius: 8px;
+}
+
+/* Nodes */
+.node {
+  background-color: #ffffff; /* White background for nodes */
+  border: 1px solid #d3d7da; /* WAGO secondary.main */
+  border-radius: 8px;
+  color: #333333; /* WAGO text.primary */
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); /* From MuiCard */
+}
+
+/* Selected node */
+.node-selected {
+  border-color: #6ec800; /* WAGO primary.main */
+  border-width: 2px; /* Thicker border for emphasis */
+}
+
+/* Node title */
+.node-title {
+  background-color: #6ec800; /* WAGO primary.main */
+  color: #ffffff; /* White for contrast */
+  font-weight: 600;
+  text-transform: uppercase;
+  border-radius: 8px 8px 0 0;
+}
+
+/* Node hover */
+.node:hover {
+  background-color: #e0e0e0; /* From MuiListItem hover */
+}
+
+/* Edges */
+.edge-path {
+  stroke: #666666; /* WAGO text.secondary */
+  stroke-width: 1.5px; /* Thicker for visibility */
+}
+
+/* Buttons and controls */
+.control-button {
+  background-color: #6ec800; /* WAGO primary.main */
+  color: #ffffff;
+  border-radius: 8px;
+  text-transform: uppercase;
+}
+
+.control-button:hover {
+  background-color: #5aa700; /* Button hover from theme */
+}
+
+.control-button:disabled {
+  background-color: #d3d7da; /* WAGO secondary.main */
+  color: #666666; /* WAGO text.secondary */
+}
+
+/* Ensure text in nodes is readable */
+text {
+  fill: #333333; /* WAGO text.primary */
+  font-family: 'DIN Next Pro', 'Roboto', sans-serif;
+  font-size: 12px; /* Match existing font size */
+}
