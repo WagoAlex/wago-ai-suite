@@ -1,3 +1,5 @@
+version: "3.8"
+
 services:
   wago-ai-suite:
     image: wagoalex/wago-ai-suite-ui:latest
@@ -28,7 +30,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./backend/ssl:/app/ssl
-      - /docker/tests:/app/audio 
+      - /docker/tests:/app/audio
       - /etc/docker/certs:/etc/docker/certs
     environment:
       - API_KEY=${API_KEY}
@@ -39,29 +41,32 @@ services:
   wago-label-studio:
     image: heartexlabs/label-studio:latest
     container_name: wago-label-studio
-    environment:
-      - LABEL_STUDIO_HOST=https://192.168.2.165/labelstudio
-      - STATIC_URL=/static/
-      - CSRF_TRUSTED_ORIGINS=https://192.168.2.165,https://192.168.2.165/labelstudio
-      - DJANGO_CSRF_COOKIE_SECURE=false
-      - DJANGO_SECURE_SSL_REDIRECT=false
-      - DJANGO_SESSION_COOKIE_SECURE=false
-      - DJANGO_SESSION_COOKIE_PATH=/labelstudio
-      - DJANGO_CSRF_COOKIE_PATH=/labelstudio
-      - DJANGO_SESSION_COOKIE_SAMESITE=None
-      - DJANGO_CSRF_COOKIE_SAMESITE=None
-      - LABEL_STUDIO_USERNAME=admin
-      - LABEL_STUDIO_PASSWORD=wago
-      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
-      - LABEL_STUDIO_CSP_DIRECTIVES=default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; frame-src *; img-src * data:; connect-src *; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'
-      - DEBUG=true
-      - ALLOWED_HOSTS=*
-      - DJANGO_USE_X_FORWARDED_HOST=true
-      - DJANGO_FORCE_SCRIPT_NAME=/labelstudio
     ports:
       - "8080:8080"
     volumes:
       - /docker/labelstudio/data:/label-studio/data
+    environment:
+      - LABEL_STUDIO_USERNAME=admin
+      - LABEL_STUDIO_PASSWORD=wagowago
+      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=false
+      - LABEL_STUDIO_DISABLE_CSP=true
+      - LABEL_STUDIO_HOST=https://192.168.2.165
+      - LABEL_STUDIO_BASE_URL=/labelstudio
+      - STATIC_URL=/labelstudio/static/
+      - DEBUG=false
+      - ALLOWED_HOSTS=*
+      - FORCE_SCRIPT_NAME=/labelstudio
+      - DJANGO_USE_X_FORWARDED_HOST=true
+      - DJANGO_USE_X_FORWARDED_PORT=true
+      - DJANGO_SESSION_COOKIE_SECURE=false
+      - DJANGO_CSRF_COOKIE_SECURE=false
+      - DJANGO_SESSION_COOKIE_PATH=/labelstudio/
+      - DJANGO_CSRF_COOKIE_PATH=/labelstudio/
+      - DJANGO_SESSION_COOKIE_SAMESITE=Lax
+      - DJANGO_CSRF_COOKIE_SAMESITE=Lax
+      - LABEL_STUDIO_PUBLIC_URL=https://192.168.2.165/labelstudio
+      - COLLECT_ANALYTICS=False
+
     networks:
       - waa_cm_network
 
