@@ -72,7 +72,8 @@ RUN apt-get update && apt-get install -y \
 
 # Copy the built React app
 COPY --from=build /app/build /usr/share/nginx/html
-
+# Copy configuration files
+COPY public/container-patterns.yml /usr/share/nginx/html/config/
 # Copy SSL certificates
 COPY ssl/selfsigned.crt /etc/ssl/nginx/selfsigned.crt
 COPY ssl/selfsigned.key /etc/ssl/nginx/selfsigned.key

@@ -496,55 +496,183 @@ app.post('/api/upload-certificates', upload.fields([
   }
 });
 
-// Get Jupyter container name
-app.get('/api/jupyter/container-name', async (req, res) => {
-  const containerSuffix = 'wago-jupyter';
+// Helper function to select the best Label Studio container
+const selectBestLabelStudioContainer = (containers) => {
+  // Sort containers by priority:
+  // 1. Running containers first
+  // 2. Containers with "wago" in the name
+  // 3. Recently created containers
+  
+  const sorted = containers.sort((a, b) => {
+    // First priority: running state
+    const aRunning = a.State === 'running' ? 1 : 0;
+    const bRunning = b.State === 'running' ? 1 : 0;
+    if (aRunning !== bRunning) return bRunning - aRunning;
+    
+    // Second priority: has "wago" in name
+    const aWago = a.Names.some(n => n.toLowerCase().includes('wago')) ? 1 : 0;
+    const bWago = b.Names.some(n => n.toLowerCase().includes('wago')) ? 1 : 0;
+    if (aWago !== bWago) return bWago - aWago;
+    
+    // Third priority: creation time (newer first)
+    return b.Created - a.Created;
+  });
+  
+  return sorted[0];
+};
+
+// Get Label Studio container name with smart selection
+app.get('/api/labelstudio/container-name', async (req, res) => {
+  console.log('[LabelStudio] Fetching container name...');
+  
   try {
     const containers = await localDocker.listContainers({ all: true });
-    const matchingContainers = containers.filter((container) =>
-      container.Names.some((name) => name.includes('jupyter'))
+    const labelStudioContainers = containers.filter((container) =>
+      container.Names.some((name) => name.toLowerCase().includes('label-studio') || name.toLowerCase().includes('labelstudio'))
     );
-    if (matchingContainers.length === 0) {
-      return res.status(404).json({ error: 'No Jupyter container found' });
+    
+    if (labelStudioContainers.length === 0) {
+      console.log('[LabelStudio] No Label Studio container found');
+      return res.status(404).json({ 
+        error: 'No Label Studio container found',
+        hint: 'Please ensure Label Studio container is installed'
+      });
     }
-    if (matchingContainers.length > 1) {
-      return res.status(500).json({ error: 'Multiple Jupyter containers found' });
+    
+    // Analyze the containers
+    const containerStats = {
+      total: labelStudioContainers.length,
+      running: labelStudioContainers.filter(c => c.State === 'running').length,
+      stopped: labelStudioContainers.filter(c => c.State === 'exited').length,
+      other: labelStudioContainers.filter(c => c.State !== 'running' && c.State !== 'exited').length
+    };
+    
+    console.log('[LabelStudio] Container statistics:', containerStats);
+    
+    // Select the best container
+    const selectedContainer = selectBestLabelStudioContainer(labelStudioContainers);
+    const containerName = selectedContainer.Names[0].replace(/^\//, '');
+    
+    console.log(`[LabelStudio] Selected container: ${containerName} (state: ${selectedContainer.State})`);
+    
+    // Prepare response
+    const response = {
+      containerName,
+      containerState: selectedContainer.State,
+      containerStats
+    };
+    
+    // Add hint if multiple containers found
+    if (labelStudioContainers.length > 1) {
+      response.hint = `Found ${containerStats.total} Label Studio containers: ${containerStats.running} running, ${containerStats.stopped} stopped${containerStats.other > 0 ? `, ${containerStats.other} other` : ''}. Using ${containerName}.`;
+      console.log('[LabelStudio] Multiple containers hint:', response.hint);
     }
-    const containerName = matchingContainers[0].Names[0].replace(/^\//, '');
-    res.status(200).json({ containerName });
+    
+    res.status(200).json(response);
   } catch (error) {
-    console.error('Error fetching Jupyter container name:', error);
-    res.status(500).json({ error: 'Failed to fetch Jupyter container name' });
+    console.error('[LabelStudio] Error fetching container name:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Label Studio container name',
+      details: error.message
+    });
   }
 });
 
-// Toggle Jupyter container state
-app.post('/api/jupyter/config', async (req, res) => {
+// Update Label Studio configuration with smart selection
+app.post('/api/labelstudio/config', async (req, res) => {
   const { enabled } = req.body;
-  const containerSuffix = 'wago-jupyter';
+  console.log(`[LabelStudio] Config update requested: enabled=${enabled}`);
+  
   try {
     const containers = await localDocker.listContainers({ all: true });
-    const matchingContainers = containers.filter((container) =>
-      container.Names.some((name) => name.includes('jupyter'))
+    const labelStudioContainers = containers.filter((container) =>
+      container.Names.some((name) => name.toLowerCase().includes('label-studio') || name.toLowerCase().includes('labelstudio'))
     );
-    if (matchingContainers.length !== 1) {
-      throw new Error(`Expected 1 Jupyter container, found ${matchingContainers.length}`);
+    
+    if (labelStudioContainers.length === 0) {
+      console.error('[LabelStudio] No Label Studio container found');
+      return res.status(404).json({ 
+        error: 'No Label Studio container found',
+        hint: 'Please ensure Label Studio container is installed'
+      });
     }
-    const containerName = matchingContainers[0].Names[0].replace(/^\//, '');
-    const container = localDocker.getContainer(containerName);
-
+    
+    // Select the best container
+    const selectedContainer = selectBestLabelStudioContainer(labelStudioContainers);
+    const containerName = selectedContainer.Names[0].replace(/^\//, '');
+    const containerId = selectedContainer.Id;
+    
+    console.log(`[LabelStudio] Selected container for operation: ${containerName} (${containerId})`);
+    
+    // If enabling and there's already a running container that's not the selected one, stop it
     if (enabled) {
-      await container.start();
-    } else {
-      await container.stop();
+      const runningContainers = labelStudioContainers.filter(c => c.State === 'running' && c.Id !== containerId);
+      if (runningContainers.length > 0) {
+        console.log(`[LabelStudio] Stopping ${runningContainers.length} other running Label Studio container(s)`);
+        for (const running of runningContainers) {
+          try {
+            const container = localDocker.getContainer(running.Id);
+            await container.stop();
+            console.log(`[LabelStudio] Stopped container: ${running.Names[0]}`);
+          } catch (err) {
+            console.warn(`[LabelStudio] Failed to stop container ${running.Names[0]}:`, err.message);
+          }
+        }
+      }
     }
-    res.status(200).json({ message: 'Jupyter config updated' });
+    
+    const container = localDocker.getContainer(containerId);
+
+    try {
+      const inspection = await container.inspect();
+      const isRunning = inspection.State.Running;
+      
+      let message = '';
+      if (enabled && !isRunning) {
+        await container.start();
+        message = `Started Label Studio container: ${containerName}`;
+      } else if (!enabled && isRunning) {
+        await container.stop();
+        message = `Stopped Label Studio container: ${containerName}`;
+      } else {
+        message = `Label Studio container ${containerName} already ${enabled ? 'running' : 'stopped'}`;
+      }
+      
+      // Prepare response
+      const response = {
+        message,
+        containerName,
+        enabled
+      };
+      
+      // Add container stats if multiple found
+      if (labelStudioContainers.length > 1) {
+        response.containerStats = {
+          total: labelStudioContainers.length,
+          managed: containerName
+        };
+        response.hint = `Managing ${containerName} out of ${labelStudioContainers.length} Label Studio containers found`;
+      }
+      
+      res.status(200).json(response);
+    } catch (dockerError) {
+      if (dockerError.statusCode === 304) {
+        return res.status(200).json({ 
+          message: `Label Studio container ${containerName} already ${enabled ? 'running' : 'stopped'}`,
+          containerName,
+          enabled 
+        });
+      }
+      throw dockerError;
+    }
   } catch (error) {
-    console.error('Error updating Jupyter config:', error);
-    res.status(500).json({ error: 'Failed to update Jupyter config' });
+    console.error('[LabelStudio] Error updating config:', error);
+    res.status(500).json({ 
+      error: 'Failed to update Label Studio config',
+      details: error.message
+    });
   }
 });
-
 // Get Grafana container name
 app.get('/api/grafana/container-name', async (req, res) => {
   const containerSuffix = 'oGenericAnalytics_grafana';
@@ -869,7 +997,6 @@ app.get('/api/labelstudio/container-name', async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch Label Studio container name' });
   }
 });
-
 // Update Label Studio configuration (start/stop container)
 app.post('/api/labelstudio/config', async (req, res) => {
   const { enabled } = req.body;
@@ -878,24 +1005,61 @@ app.post('/api/labelstudio/config', async (req, res) => {
     const labelStudioContainer = containers.find((container) =>
       container.Names.some((name) => name.includes('label-studio'))
     );
+    
     if (!labelStudioContainer) {
-      throw new Error('Label Studio container not found');
+      console.error('Label Studio container not found');
+      return res.status(404).json({ error: 'Label Studio container not found' });
     }
+    
     const containerName = labelStudioContainer.Names[0].replace(/^\//, '');
-    const container = localDocker.getContainer(containerName);
+    console.log(`Found Label Studio container: ${containerName}, current state: ${labelStudioContainer.State}`);
+    
+    const container = localDocker.getContainer(labelStudioContainer.Id);
 
-    if (enabled) {
-      await container.start();
-    } else {
-      await container.stop();
+    try {
+      if (enabled) {
+        // Check if container is already running
+        const containerInfo = await container.inspect();
+        if (containerInfo.State.Running) {
+          console.log('Label Studio container is already running');
+          return res.status(200).json({ message: 'Label Studio is already running' });
+        }
+        
+        console.log('Starting Label Studio container...');
+        await container.start();
+        console.log('Label Studio container started successfully');
+      } else {
+        // Check if container is already stopped
+        const containerInfo = await container.inspect();
+        if (!containerInfo.State.Running) {
+          console.log('Label Studio container is already stopped');
+          return res.status(200).json({ message: 'Label Studio is already stopped' });
+        }
+        
+        console.log('Stopping Label Studio container...');
+        await container.stop();
+        console.log('Label Studio container stopped successfully');
+      }
+      res.status(200).json({ message: 'Label Studio config updated' });
+    } catch (dockerError) {
+      console.error('Docker operation error:', dockerError);
+      
+      // Check if it's a "container already started/stopped" error
+      if (dockerError.statusCode === 304) {
+        return res.status(200).json({ message: 'Label Studio state unchanged' });
+      }
+      
+      throw dockerError;
     }
-    res.status(200).json({ message: 'Label Studio config updated' });
   } catch (error) {
     console.error('Error updating Label Studio config:', error);
-    res.status(500).json({ error: 'Failed to update Label Studio config' });
+    res.status(500).json({ 
+      error: 'Failed to update Label Studio config', 
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
-
 // Load self-signed certificates for the server
 const options = {
   key: fsp.readFileSync('/app/ssl/backend-selfsigned.key'),

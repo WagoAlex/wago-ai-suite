@@ -65,7 +65,7 @@ services:
       - DJANGO_SESSION_COOKIE_SAMESITE=Lax
       - DJANGO_CSRF_COOKIE_SAMESITE=Lax
       - LABEL_STUDIO_PUBLIC_URL=https://192.168.2.165/labelstudio
-      - COLLECT_ANALYTICS=False
+     
 
     networks:
       - waa_cm_network

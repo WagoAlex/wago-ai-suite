@@ -17,6 +17,7 @@ function Model() {
   const [containerStatus, setContainerStatus] = useState('unknown');
   const [errorMessage, setErrorMessage] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [containerHint, setContainerHint] = useState(null);
   const jupyterUrl = '/jupyter/lab'; 
 
   useEffect(() => {
@@ -26,14 +27,17 @@ function Model() {
   const fetchContainerInfo = async () => {
     try {
       const response = await axios.get('/api/jupyter/container-name');
-      const name = response.data.containerName;
-      setJupyterContainerName(name);
-
-      const statusResponse = await axios.get(`/api/containers/${name}/status`);
+      const data = response.data;
+      
+      setJupyterContainerName(data.containerName);
+      setContainerHint(data.hint || null);
+      
+      // Fetch detailed status
+      const statusResponse = await axios.get(`/api/containers/${data.containerName}/status`);
       setContainerStatus(statusResponse.data.status);
     } catch (error) {
       console.error('Error fetching container info:', error);
-      setErrorMessage('Failed to fetch container information');
+      setErrorMessage(error.response?.data?.hint || 'Failed to fetch container information');
       setContainerStatus('unknown');
     }
   };
@@ -50,12 +54,19 @@ function Model() {
     setErrorMessage(null);
     setIsUpdating(true);
     try {
-      await axios.post('/api/jupyter/config', { enabled });
-      console.log('Jupyter config updated successfully');
+      const response = await axios.post('/api/jupyter/config', { enabled });
+      console.log('Jupyter config updated:', response.data);
+      
+      // Update hint if provided
+      if (response.data.hint) {
+        setContainerHint(response.data.hint);
+      }
+      
       await fetchContainerInfo();
     } catch (error) {
       console.error('Error updating Jupyter config:', error);
       setErrorMessage(error.response?.data?.error || 'Failed to update Jupyter configuration');
+      setIsJupyterEnabled(!enabled); // Revert on failure
     } finally {
       setIsUpdating(false);
     }
@@ -99,6 +110,11 @@ function Model() {
             }}
           />
         </Box>
+      )}
+      {containerHint && (
+        <Alert severity="info" sx={{ mt: 1, mb: 2 }}>
+          {containerHint}
+        </Alert>
       )}
       {errorMessage && (
         <Alert severity="error" sx={{ my: 2 }}>
