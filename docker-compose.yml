@@ -45,26 +45,40 @@ services:
       - "8080:8080"
     volumes:
       - /docker/labelstudio/data:/label-studio/data
+      - /docker/labelstudio/files:/label-studio/files
     environment:
-      - LABEL_STUDIO_USERNAME=admin
-      - LABEL_STUDIO_PASSWORD=wagowago
-      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=false
-      - LABEL_STUDIO_DISABLE_CSP=true
-      - LABEL_STUDIO_HOST=https://192.168.2.165
-      - LABEL_STUDIO_BASE_URL=/labelstudio
+      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
+      - LABEL_STUDIO_USERNAME=alexander.fugmann@wago.com
+      - LABEL_STUDIO_PASSWORD=wago1951
+      - LABEL_STUDIO_EMAIL=alexander.fugmann@wago.com
+      - LABEL_STUDIO_LOCAL_AUTH=True
+      - LABEL_STUDIO_HOST=https://192.168.2.165/labelstudio
+      - LABEL_STUDIO_URL_PREFIX=/labelstudio
+
+      - LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
+      - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/label-studio/files
       - STATIC_URL=/labelstudio/static/
+      - CSRF_TRUSTED_ORIGINS=https://192.168.2.165
+      - DJANGO_CSRF_COOKIE_SECURE=false
+      - DJANGO_SECURE_SSL_REDIRECT=false
+      - DJANGO_SESSION_COOKIE_SECURE=false
+      - DJANGO_SESSION_COOKIE_PATH=/labelstudio
+      - DJANGO_CSRF_COOKIE_PATH=/labelstudio
+      - DJANGO_SESSION_COOKIE_SAMESITE=None
+      - DJANGO_CSRF_COOKIE_SAMESITE=None
+      - DJANGO_SESSION_COOKIE_HTTPONLY=false
+      - DJANGO_CSRF_COOKIE_HTTPONLY=false
+      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
+      #- LABEL_STUDIO_CSP_DIRECTIVES=default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; frame-src *; img-src * data:; connect-src *; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; frame-ancestors *
+      - LABEL_STUDIO_CSP_DIRECTIVES="default-src * 'unsafe-inline' 'unsafe-eval' data:; blob:; script-src * 'unsafe-inline' 'unsafe-eval'; frame-ancestors *; frame-src *; connect-src *; img-src * data:; style-src * 'unsafe-inline';"
+
       - DEBUG=false
       - ALLOWED_HOSTS=*
-      - FORCE_SCRIPT_NAME=/labelstudio
       - DJANGO_USE_X_FORWARDED_HOST=true
-      - DJANGO_USE_X_FORWARDED_PORT=true
-      - DJANGO_SESSION_COOKIE_SECURE=false
-      - DJANGO_CSRF_COOKIE_SECURE=false
-      - DJANGO_SESSION_COOKIE_PATH=/labelstudio/
-      - DJANGO_CSRF_COOKIE_PATH=/labelstudio/
-      - DJANGO_SESSION_COOKIE_SAMESITE=Lax
-      - DJANGO_CSRF_COOKIE_SAMESITE=Lax
-      - LABEL_STUDIO_PUBLIC_URL=https://192.168.2.165/labelstudio
+      - DJANGO_USE_X_FORWARDED_PROTO=true
+      - DJANGO_FORCE_SCRIPT_NAME=/labelstudio
+      - LABEL_STUDIO_DISABLE_CSRF_MIDDLEWARE=false
+      - LABEL_STUDIO_CORS_ALLOWED_ORIGINS=https://192.168.2.165
      
 
     networks:

@@ -495,7 +495,196 @@ app.post('/api/upload-certificates', upload.fields([
     res.status(500).json({ error: 'Failed to upload certificates', details: error.message });
   }
 });
+// Helper function to select the best Jupyter container
+const selectBestJupyterContainer = (containers) => {
+  // Sort containers by priority:
+  // 1. Running containers first
+  // 2. Recently created containers
+  // 3. Containers with "wago" in the name (likely our managed ones)
+  
+  const sorted = containers.sort((a, b) => {
+    // First priority: running state
+    const aRunning = a.State === 'running' ? 1 : 0;
+    const bRunning = b.State === 'running' ? 1 : 0;
+    if (aRunning !== bRunning) return bRunning - aRunning;
+    
+    // Second priority: has "wago" in name
+    const aWago = a.Names.some(n => n.toLowerCase().includes('wago')) ? 1 : 0;
+    const bWago = b.Names.some(n => n.toLowerCase().includes('wago')) ? 1 : 0;
+    if (aWago !== bWago) return bWago - aWago;
+    
+    // Third priority: creation time (newer first)
+    return b.Created - a.Created;
+  });
+  
+  return sorted[0];
+};
 
+// Get Jupyter container name with smart selection
+app.get('/api/jupyter/container-name', async (req, res) => {
+  console.log('[Jupyter] Fetching container name...');
+  
+  try {
+    const containers = await localDocker.listContainers({ all: true });
+    
+    // Look for any container with 'jupyter' in the name (case-insensitive)
+    const matchingContainers = containers.filter((container) =>
+      container.Names.some((name) => name.toLowerCase().includes('jupyter'))
+    );
+    
+    if (matchingContainers.length === 0) {
+      console.log('[Jupyter] No Jupyter container found');
+      return res.status(404).json({ 
+        error: 'No Jupyter container found',
+        hint: 'Please ensure a Jupyter container is installed'
+      });
+    }
+    
+    // Analyze the containers
+    const containerStats = {
+      total: matchingContainers.length,
+      running: matchingContainers.filter(c => c.State === 'running').length,
+      stopped: matchingContainers.filter(c => c.State === 'exited').length,
+      other: matchingContainers.filter(c => c.State !== 'running' && c.State !== 'exited').length
+    };
+    
+    console.log('[Jupyter] Container statistics:', containerStats);
+    
+    // Select the best container
+    const selectedContainer = selectBestJupyterContainer(matchingContainers);
+    const containerName = selectedContainer.Names[0].replace(/^\//, '');
+    
+    console.log(`[Jupyter] Selected container: ${containerName} (state: ${selectedContainer.State})`);
+    
+    // Prepare response with additional info
+    const response = {
+      containerName,
+      containerState: selectedContainer.State,
+      containerStats
+    };
+    
+    // Add hint if multiple containers found
+    if (matchingContainers.length > 1) {
+      response.hint = `Found ${containerStats.total} Jupyter containers: ${containerStats.running} running, ${containerStats.stopped} stopped${containerStats.other > 0 ? `, ${containerStats.other} other` : ''}. Using ${containerName}.`;
+      console.log('[Jupyter] Multiple containers hint:', response.hint);
+    }
+    
+    res.status(200).json(response);
+  } catch (error) {
+    console.error('[Jupyter] Error fetching container name:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch Jupyter container name',
+      details: error.message
+    });
+  }
+});
+
+// Toggle Jupyter container state with smart selection
+app.post('/api/jupyter/config', async (req, res) => {
+  const { enabled } = req.body;
+  console.log(`[Jupyter] Config update requested: enabled=${enabled}`);
+  
+  try {
+    const containers = await localDocker.listContainers({ all: true });
+    const matchingContainers = containers.filter((container) =>
+      container.Names.some((name) => name.toLowerCase().includes('jupyter'))
+    );
+    
+    if (matchingContainers.length === 0) {
+      console.error('[Jupyter] No Jupyter container found');
+      return res.status(404).json({ 
+        error: 'No Jupyter container found',
+        hint: 'Please ensure a Jupyter container is installed'
+      });
+    }
+    
+    // Select the best container
+    const selectedContainer = selectBestJupyterContainer(matchingContainers);
+    const containerName = selectedContainer.Names[0].replace(/^\//, '');
+    const containerId = selectedContainer.Id;
+    
+    console.log(`[Jupyter] Selected container for operation: ${containerName} (${containerId})`);
+    
+    // If enabling and there's already a running container that's not the selected one, stop it
+    if (enabled) {
+      const runningContainers = matchingContainers.filter(c => c.State === 'running' && c.Id !== containerId);
+      if (runningContainers.length > 0) {
+        console.log(`[Jupyter] Stopping ${runningContainers.length} other running Jupyter container(s)`);
+        for (const running of runningContainers) {
+          try {
+            const container = localDocker.getContainer(running.Id);
+            await container.stop();
+            console.log(`[Jupyter] Stopped container: ${running.Names[0]}`);
+          } catch (err) {
+            console.warn(`[Jupyter] Failed to stop container ${running.Names[0]}:`, err.message);
+          }
+        }
+      }
+    }
+    
+    const container = localDocker.getContainer(containerId);
+
+    try {
+      const inspection = await container.inspect();
+      const isRunning = inspection.State.Running;
+      
+      console.log(`[Jupyter] Container is currently ${isRunning ? 'running' : 'stopped'}`);
+      
+      let message = '';
+      if (enabled && !isRunning) {
+        console.log('[Jupyter] Starting container...');
+        await container.start();
+        message = `Started Jupyter container: ${containerName}`;
+        console.log('[Jupyter] Container started successfully');
+      } else if (!enabled && isRunning) {
+        console.log('[Jupyter] Stopping container...');
+        await container.stop();
+        message = `Stopped Jupyter container: ${containerName}`;
+        console.log('[Jupyter] Container stopped successfully');
+      } else {
+        message = `Jupyter container ${containerName} already ${enabled ? 'running' : 'stopped'}`;
+        console.log(`[Jupyter] Container already in desired state`);
+      }
+      
+      // Prepare response
+      const response = {
+        message,
+        containerName,
+        enabled
+      };
+      
+      // Add container stats if multiple found
+      if (matchingContainers.length > 1) {
+        const containerStats = {
+          total: matchingContainers.length,
+          managed: containerName
+        };
+        response.containerStats = containerStats;
+        response.hint = `Managing ${containerName} out of ${containerStats.total} Jupyter containers found`;
+      }
+      
+      res.status(200).json(response);
+    } catch (dockerError) {
+      console.error('[Jupyter] Docker operation error:', dockerError);
+      
+      if (dockerError.statusCode === 304) {
+        return res.status(200).json({ 
+          message: `Jupyter container ${containerName} already ${enabled ? 'running' : 'stopped'}`,
+          containerName,
+          enabled 
+        });
+      }
+      
+      throw dockerError;
+    }
+  } catch (error) {
+    console.error('[Jupyter] Error updating config:', error);
+    res.status(500).json({ 
+      error: 'Failed to update Jupyter config',
+      details: error.message
+    });
+  }
+});
 // Helper function to select the best Label Studio container
 const selectBestLabelStudioContainer = (containers) => {
   // Sort containers by priority:

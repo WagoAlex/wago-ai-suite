@@ -32,59 +32,57 @@ server {
         return 301 /labelstudio/;
     }
 
-    location /labelstudio/ {
-        # strip /labelstudio before passing upstream
-        proxy_pass          http://wago-label-studio:8080/;
-        proxy_http_version  1.1;
+location /labelstudio/ {
+    proxy_pass http://wago-label-studio:8080/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Prefix /labelstudio;
+    proxy_set_header X-CSRFToken $http_x_csrftoken;
+    proxy_set_header Referer $http_referer;
+    proxy_redirect off;
+    proxy_cookie_path / /labelstudio/;
+    proxy_cookie_domain wago-label-studio $host;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    
+    # Add CORS headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+}
 
-        # ── Pass the right original headers for Django CSRF & host checks ──
-        proxy_set_header    Host               $host;
-        proxy_set_header    X-Real-IP          $remote_addr;
-        proxy_set_header    X-Forwarded-For    $proxy_add_x_forwarded_for;
-        proxy_set_header    X-Forwarded-Proto  $scheme;
-        proxy_set_header    X-Forwarded-Host   $host;
-        proxy_set_header    X-Forwarded-Port   $server_port;
-        proxy_set_header    Referer            $http_referer;
-        proxy_set_header    X-Script-Name      /labelstudio;
+location /labelstudio/static/ {
+    proxy_pass http://wago-label-studio:8080/static/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Prefix /labelstudio;
+    
+    # Cache static files
+    proxy_cache_valid 200 302 60m;
+    proxy_cache_valid 404 1m;
+}
 
-        # ── Preserve & rewrite cookies & redirects for the subpath ──
-        proxy_cookie_path   /                  /labelstudio/;
-        proxy_redirect      /                  /labelstudio/;
-
-        # ── Allow body rewrites so sub_filter can work on compressed assets ──
-        proxy_set_header    Accept-Encoding    "";
-        sub_filter_types    text/html
-                            application/javascript
-                            application/json;
-        sub_filter_once     off;
-
-        # ── Rewrite any absolute LS paths to include /labelstudio ──────────
-        sub_filter 'action="/user/login'      'action="/labelstudio/user/login';
-        sub_filter 'action="/user/logout'     'action="/labelstudio/user/logout';
-        sub_filter '"/user/login'             '"/labelstudio/user/login';
-        sub_filter '"/user/logout'            '"/labelstudio/user/logout';
-        sub_filter '"/__lsa'                  '"/labelstudio/__lsa';
-        sub_filter '"/api/'                   '"/labelstudio/api/';
-        sub_filter 'src="/static/'            'src="/labelstudio/static/';
-        sub_filter 'href="/static/'           'href="/labelstudio/static/';
-        sub_filter 'src="/media/'             'src="/labelstudio/media/';
-        sub_filter 'href="/media/'            'href="/labelstudio/media/';
-        # catch‑all for any future absolute endpoints
-        sub_filter '"/health'                 '"/labelstudio/health';
-        sub_filter '"/metrics'                '"/labelstudio/metrics';
-
-        # ── WebSocket / upgrade headers ──────────────────────────────────
-        proxy_set_header    Upgrade            $http_upgrade;
-        proxy_set_header    Connection         "upgrade";
-
-        # ── Buffers & timeouts ──────────────────────────────────────────
-        proxy_buffer_size       128k;
-        proxy_buffers           4 256k;
-        proxy_busy_buffers_size 256k;
-        proxy_connect_timeout   300s;
-        proxy_send_timeout      300s;
-        proxy_read_timeout      300s;
-    }
+location /labelstudio/user/ {
+    proxy_pass http://wago-label-studio:8080/user/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Prefix /labelstudio;
+    proxy_set_header X-CSRFToken $http_x_csrftoken;
+    proxy_set_header Referer $http_referer;
+    proxy_redirect off;
+    proxy_cookie_path / /labelstudio/;
+    proxy_cookie_domain wago-label-studio $host;
+    proxy_http_version 1.1;
+}
 
     # suppress stray telemetry if still hit directly
     location /__lsa/ {
