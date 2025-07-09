@@ -6,6 +6,7 @@ services:
     container_name: wago-ai-suite
     ports:
       - "443:443"
+      - "80:80"
     volumes:
       - /docker/tests:/app
       - /etc/docker/certs:/etc/docker/certs
@@ -21,6 +22,7 @@ services:
       - wago-label-studio
     networks:
       - waa_cm_network
+    restart: unless-stopped
 
   wago-ai-suite-backend:
     image: wagoalex/wago-ai-suite-backend:latest
@@ -37,6 +39,7 @@ services:
       - INFERENCE_URL=${INFERENCE_URL}
     networks:
       - waa_cm_network
+    restart: unless-stopped
 
   wago-label-studio:
     image: heartexlabs/label-studio:latest
@@ -47,58 +50,94 @@ services:
       - /docker/labelstudio/data:/label-studio/data
       - /docker/labelstudio/files:/label-studio/files
     environment:
-     # Initial setup credentials (used once)
-      LABEL_STUDIO_USERNAME:                  "alexander.fugmann@wago.com"
-      LABEL_STUDIO_PASSWORD:                  "wagowago"
-      LABEL_STUDIO_USER_EMAIL:                "alexander.fugmann@wago.com"
-
-      # General settings
-      LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK: "true"
-      LABEL_STUDIO_LOCAL_AUTH:                "True"
-      LABEL_STUDIO_HOST:                      "https://192.168.2.165/labelstudio"
-      LABEL_STUDIO_URL_PREFIX:                "/labelstudio"
-      LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED: "true"
-      LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT:  "/label-studio/files"
-
-      # Static URL: matches Nginx proxy path
-      STATIC_URL:                             "/labelstudio/static/"
-
-      # Security: cookies & CSRF under /labelstudio
-      DJANGO_FORCE_SCRIPT_NAME:               "/labelstudio"
-      DJANGO_SESSION_COOKIE_SECURE:           "true"
-      DJANGO_SESSION_COOKIE_SAMESITE:         "None"
-      DJANGO_SESSION_COOKIE_PATH:             "/labelstudio"
-      DJANGO_SESSION_COOKIE_HTTPONLY:         "true"
-      DJANGO_CSRF_COOKIE_SECURE:              "true"
-      DJANGO_CSRF_COOKIE_SAMESITE:            "None"
-      DJANGO_CSRF_COOKIE_PATH:                "/labelstudio"
-      DJANGO_CSRF_COOKIE_HTTPONLY:            "true"
-      LABEL_STUDIO_CSRF_TRUSTED_ORIGINS:      "https://192.168.2.165"
-      LABEL_STUDIO_DISABLE_CSRF_MIDDLEWARE:   "true"
-      LABEL_STUDIO_CORS_ALLOWED_ORIGINS:      "https://192.168.2.165"
+      # ===== AUTHENTICATION =====
+      LABEL_STUDIO_USERNAME: "alexander.fugmann@wago.com"
+      LABEL_STUDIO_PASSWORD: "wagowago"
+      LABEL_STUDIO_USER_EMAIL: "alexander.fugmann@wago.com"
+      
+      # ===== KRITISCHE BASE URL KONFIGURATION =====
+      # Diese müssen EXAKT zusammenpassen
+      LABEL_STUDIO_HOST: "https://192.168.2.165/labelstudio"
+      LABEL_STUDIO_BASE_URL: "/labelstudio"
+      LABEL_STUDIO_SUB_MOUNT: "/labelstudio"
+      
+      # ===== STATIC FILES - KORREKTE PFADE =====
+      STATIC_URL: "/labelstudio/static/"
+      STATIC_ROOT: "/label-studio/static"
+      MEDIA_URL: "/labelstudio/media/"
+      MEDIA_ROOT: "/label-studio/media"
+      
+      # ===== DJANGO CORE SETTINGS =====
+      DJANGO_FORCE_SCRIPT_NAME: "/labelstudio"
+      DJANGO_SUB_URL: "/labelstudio"
+      ALLOWED_HOSTS: "*"
+      DEBUG: "false"  # Produktionsmodus für bessere Performance
+      
+      # ===== PROXY SETTINGS =====
+      DJANGO_USE_X_FORWARDED_HOST: "true"
+      DJANGO_USE_X_FORWARDED_PROTO: "true"
+      DJANGO_USE_X_FORWARDED_PORT: "true"
+      
+      # ===== SECURITY - KOMPLETT DEAKTIVIERT FÜR IFRAME =====
+      DJANGO_SECURE_SSL_REDIRECT: "false"
+      DJANGO_SECURE_CONTENT_TYPE_NOSNIFF: "false"
+      DJANGO_SECURE_BROWSER_XSS_FILTER: "false"
+      DJANGO_SECURE_HSTS_SECONDS: "0"
+      DJANGO_SECURE_FRAME_DENY: "false"
+      
+      # ===== SESSION & COOKIES - IFRAME KOMPATIBEL =====
+      DJANGO_SESSION_COOKIE_SECURE: "false"
+      DJANGO_SESSION_COOKIE_SAMESITE: "None"
+      DJANGO_SESSION_COOKIE_PATH: "/labelstudio/"
+      DJANGO_SESSION_COOKIE_HTTPONLY: "false"
+      DJANGO_CSRF_COOKIE_SECURE: "false"
+      DJANGO_CSRF_COOKIE_SAMESITE: "None"
+      DJANGO_CSRF_COOKIE_PATH: "/labelstudio/"
+      DJANGO_CSRF_COOKIE_HTTPONLY: "false"
+      
+      # ===== CSRF & CORS - KOMPLETT PERMISSIV =====
+      LABEL_STUDIO_CSRF_TRUSTED_ORIGINS: "https://192.168.2.165,https://192.168.2.165:443"
+      LABEL_STUDIO_DISABLE_CSRF_MIDDLEWARE: "true"
+      LABEL_STUDIO_CORS_ALLOWED_ORIGINS: "*"
+      LABEL_STUDIO_CORS_ALLOW_ALL_ORIGINS: "true"
+      
+      # ===== CSP - KOMPLETT DEAKTIVIERT =====
       LABEL_STUDIO_DISABLE_CSP_MIDDLEWARE: "true"
+      LABEL_STUDIO_DISABLE_CSP: "true"
+      LABEL_STUDIO_CSP_DIRECTIVES: ""
+      LABEL_STUDIO_CSP_REPORT_ONLY: "false"
+      
+      # ===== WEITERE SECURITY MIDDLEWARE DEAKTIVIEREN =====
+      LABEL_STUDIO_DISABLE_MIDDLEWARE: "true"
+      LABEL_STUDIO_DISABLE_SECURITY_MIDDLEWARE: "true"
+      
+      # ===== FEATURES =====
+      LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK: "true"
+      LABEL_STUDIO_LOCAL_AUTH: "true"
+      LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED: "true"
+      LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT: "/label-studio/files"
+      
+      # ===== TELEMETRY DEAKTIVIERT =====
+      LABEL_STUDIO_DISABLE_TELEMETRY: "true"
+      LABEL_STUDIO_DISABLE_ANALYTICS: "true"
+      LABEL_STUDIO_DISABLE_SENTRY: "true"
+      
+      
 
-      LABEL_STUDIO_CSP_DIRECTIVES:        ""
-
-      # CSP: disable report-only, allow embedding everywhere
-      LABEL_STUDIO_CSP_REPORT_ONLY:           "false"
-     
-
-      # Optional: suppress telemetry
-      LABEL_STUDIO_DISABLE_TELEMETRY:         "true"
-      LABEL_STUDIO_DISABLE_ANALYTICS:         "true"
-
-      # Django & proxy compatibility
-      ALLOWED_HOSTS:                          "*"
-      DEBUG:                                  "false"
-      DJANGO_SECURE_SSL_REDIRECT:             "false"
-      DJANGO_USE_X_FORWARDED_HOST:            "true"
-      DJANGO_USE_X_FORWARDED_PROTO:           "true"
+      
     networks:
       - waa_cm_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
 
 volumes:
   wago-label-studio-data:
+    driver: local
 
 networks:
   waa_cm_network:
