@@ -1,4 +1,4 @@
-version: "3.8"
+version: "3.9"
 
 services:
   wago-ai-suite:
@@ -47,40 +47,53 @@ services:
       - /docker/labelstudio/data:/label-studio/data
       - /docker/labelstudio/files:/label-studio/files
     environment:
-      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
-      - LABEL_STUDIO_USERNAME=alexander.fugmann@wago.com
-      - LABEL_STUDIO_PASSWORD=wago1951
-      - LABEL_STUDIO_EMAIL=alexander.fugmann@wago.com
-      - LABEL_STUDIO_LOCAL_AUTH=True
-      - LABEL_STUDIO_HOST=https://192.168.2.165/labelstudio
-      - LABEL_STUDIO_URL_PREFIX=/labelstudio
+     # Initial setup credentials (used once)
+      LABEL_STUDIO_USERNAME:                  "alexander.fugmann@wago.com"
+      LABEL_STUDIO_PASSWORD:                  "wagowago"
+      LABEL_STUDIO_USER_EMAIL:                "alexander.fugmann@wago.com"
 
-      - LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED=true
-      - LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT=/label-studio/files
-      - STATIC_URL=/labelstudio/static/
-      - CSRF_TRUSTED_ORIGINS=https://192.168.2.165
-      - DJANGO_CSRF_COOKIE_SECURE=false
-      - DJANGO_SECURE_SSL_REDIRECT=false
-      - DJANGO_SESSION_COOKIE_SECURE=false
-      - DJANGO_SESSION_COOKIE_PATH=/labelstudio
-      - DJANGO_CSRF_COOKIE_PATH=/labelstudio
-      - DJANGO_SESSION_COOKIE_SAMESITE=None
-      - DJANGO_CSRF_COOKIE_SAMESITE=None
-      - DJANGO_SESSION_COOKIE_HTTPONLY=false
-      - DJANGO_CSRF_COOKIE_HTTPONLY=false
-      - LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK=true
-      #- LABEL_STUDIO_CSP_DIRECTIVES=default-src 'self' 'unsafe-inline' 'unsafe-eval' https:; frame-src *; img-src * data:; connect-src *; script-src * 'unsafe-inline' 'unsafe-eval'; style-src * 'unsafe-inline'; frame-ancestors *
-      - LABEL_STUDIO_CSP_DIRECTIVES="default-src * 'unsafe-inline' 'unsafe-eval' data:; blob:; script-src * 'unsafe-inline' 'unsafe-eval'; frame-ancestors *; frame-src *; connect-src *; img-src * data:; style-src * 'unsafe-inline';"
+      # General settings
+      LABEL_STUDIO_DISABLE_SIGNUP_WITHOUT_LINK: "true"
+      LABEL_STUDIO_LOCAL_AUTH:                "True"
+      LABEL_STUDIO_HOST:                      "https://192.168.2.165/labelstudio"
+      LABEL_STUDIO_URL_PREFIX:                "/labelstudio"
+      LABEL_STUDIO_LOCAL_FILES_SERVING_ENABLED: "true"
+      LABEL_STUDIO_LOCAL_FILES_DOCUMENT_ROOT:  "/label-studio/files"
 
-      - DEBUG=false
-      - ALLOWED_HOSTS=*
-      - DJANGO_USE_X_FORWARDED_HOST=true
-      - DJANGO_USE_X_FORWARDED_PROTO=true
-      - DJANGO_FORCE_SCRIPT_NAME=/labelstudio
-      - LABEL_STUDIO_DISABLE_CSRF_MIDDLEWARE=false
-      - LABEL_STUDIO_CORS_ALLOWED_ORIGINS=https://192.168.2.165
+      # Static URL: matches Nginx proxy path
+      STATIC_URL:                             "/labelstudio/static/"
+
+      # Security: cookies & CSRF under /labelstudio
+      DJANGO_FORCE_SCRIPT_NAME:               "/labelstudio"
+      DJANGO_SESSION_COOKIE_SECURE:           "true"
+      DJANGO_SESSION_COOKIE_SAMESITE:         "None"
+      DJANGO_SESSION_COOKIE_PATH:             "/labelstudio"
+      DJANGO_SESSION_COOKIE_HTTPONLY:         "true"
+      DJANGO_CSRF_COOKIE_SECURE:              "true"
+      DJANGO_CSRF_COOKIE_SAMESITE:            "None"
+      DJANGO_CSRF_COOKIE_PATH:                "/labelstudio"
+      DJANGO_CSRF_COOKIE_HTTPONLY:            "true"
+      LABEL_STUDIO_CSRF_TRUSTED_ORIGINS:      "https://192.168.2.165"
+      LABEL_STUDIO_DISABLE_CSRF_MIDDLEWARE:   "true"
+      LABEL_STUDIO_CORS_ALLOWED_ORIGINS:      "https://192.168.2.165"
+      LABEL_STUDIO_DISABLE_CSP_MIDDLEWARE: "true"
+
+      LABEL_STUDIO_CSP_DIRECTIVES:        ""
+
+      # CSP: disable report-only, allow embedding everywhere
+      LABEL_STUDIO_CSP_REPORT_ONLY:           "false"
      
 
+      # Optional: suppress telemetry
+      LABEL_STUDIO_DISABLE_TELEMETRY:         "true"
+      LABEL_STUDIO_DISABLE_ANALYTICS:         "true"
+
+      # Django & proxy compatibility
+      ALLOWED_HOSTS:                          "*"
+      DEBUG:                                  "false"
+      DJANGO_SECURE_SSL_REDIRECT:             "false"
+      DJANGO_USE_X_FORWARDED_HOST:            "true"
+      DJANGO_USE_X_FORWARDED_PROTO:           "true"
     networks:
       - waa_cm_network
 
