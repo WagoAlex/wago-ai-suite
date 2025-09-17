@@ -22,15 +22,15 @@ function BurgerMenu() {
       { label: 'Dojo', path: '/model' },
       { label: 'Analyzer', path: '/analyzer' },
 	  { label: 'Label Studio', path: '/labelstudio' },
-      { label: 'Automation', path: '/automation' }
+      //{ label: 'Automation', path: '/automation' }
     ]
     },
 	{
       label: 'WAGO AI Apps',
       subItems: [
         { label: 'Visual Inference', path: '/visual-inference' },
-        { label: 'Chat', path: '/chat' },
-        { label: 'Conversation', path: '/conversation' },
+        //{ label: 'Chat', path: '/chat' },
+        //{ label: 'Conversation', path: '/conversation' },
         {
           label: 'WagoAppAnalytics',
           subItems: [
@@ -40,14 +40,14 @@ function BurgerMenu() {
         }
       ]
     },
-    {
-      label: 'Custom AI Apps',
-      subItems: [
-        { label: 'Audio Inference', path: '/audio-inference' },
-        { label: 'Partner App', path: '/partner' }
-      ]
-    },
-    { label: 'Dataflow', path: '/dataflow' },
+    //{
+    //  label: 'Custom AI Apps',
+    //  subItems: [
+    //    { label: 'Audio Inference', path: '/audio-inference' },
+     //   { label: 'Partner App', path: '/partner' }
+      //]
+    //},
+    //{ label: 'Dataflow', path: '/dataflow' },
     { label: 'Status', path: '/status' },
     { label: 'Configuration', path: '/configuration' },
     { label: 'Help', path: '/help' },

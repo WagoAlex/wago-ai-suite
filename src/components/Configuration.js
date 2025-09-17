@@ -19,7 +19,7 @@ function Configuration({
     return [
       '/n8n/webhook-test/invoke_recording',
       '/n8n/webhook-test/invoke_audio',
-      '/n8n/webhook/e104e40e-6134-4825-a6f0-8a646d882662/chat',
+      '/n8n/webhook/ai42/chat',
     ];
   };
 
@@ -139,7 +139,7 @@ function Configuration({
       {/* Webhook Settings */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h6" sx={{ mb: 2 }}>
-          Webhook Settings (n8n)
+          Webhook Settings
         </Typography>
         {localWebhookUrls.map((url, index) => (
           <Box key={index} sx={{ display: 'flex', alignItems: 'flex-start', mb: 2, gap: 2 }}>
@@ -154,7 +154,7 @@ function Configuration({
               fullWidth
               helperText="Use relative path (e.g., /n8n/webhook-test/your-webhook-id) or full URL"
             />
-            {index < 2 && (
+            {index < 6 && (
               <Button
                 variant="contained"
                 color="secondary"
@@ -162,10 +162,10 @@ function Configuration({
                 disabled={testing[index]}
                 sx={{ mt: 1, minWidth: '100px' }} // Align with top of TextField
               >
-                {testing[index] ? 'Testing...' : 'Test'}
+                {testing[index] ? 'Started...' : 'Invoke'}
               </Button>
             )}
-            {index >= 3 && (
+            {index >= 7 && (
               <Button
                 variant="contained"
                 color="error"
@@ -179,7 +179,7 @@ function Configuration({
         ))}
         {/* Action Buttons */}
         <Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-          <Tooltip title={localWebhookUrls.length >= 6 ? 'Maximum of 6 webhooks reached' : ''} arrow>
+          <Tooltip title={localWebhookUrls.length >= 7 ? 'Maximum of 7 webhooks reached' : ''} arrow>
             <span>
               <Button
                 variant="outlined"

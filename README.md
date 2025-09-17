@@ -103,7 +103,7 @@ open https://your-server-ip
 ## 📋 Prerequisites
 
 ### System Requirements
-- **OS**: Linux (Ubuntu 20.04+ recommended)
+- **OS**: Linux (Debian 10+ / Ubuntu 20.04+ recommended)
 - **CPU**: 4+ cores
 - **RAM**: 8GB+ (16GB recommended for ML workloads)
 - **Storage**: 50GB+ free space

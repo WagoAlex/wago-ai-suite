@@ -1,13 +1,13 @@
 server {
     listen 80;
-    server_name  $SERVER_NAME;
+    server_name $SERVER_NAME;
     return 301 https://$host$request_uri; # Redirect HTTP to HTTPS
 }
-	
+
 server {
     listen 443 ssl;
     server_name $SERVER_NAME;
-    error_log /var/log/nginx/error.log warn;
+    error_log /var/log/nginx/error.log debug;
     access_log /var/log/nginx/access.log;
 
     ssl_verify_client off;
@@ -16,7 +16,7 @@ server {
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;
 
-    # Global settings for Label Studio
+    # Global proxy settings
     proxy_connect_timeout 300s;
     proxy_send_timeout 300s;
     proxy_read_timeout 300s;
@@ -24,52 +24,51 @@ server {
     proxy_buffers 32 64k;
     proxy_busy_buffers_size 128k;
 
-    # ===== LABEL STUDIO CONFIGURATION =====
+    # Normalize /api/containers/ to /api/containers
+    location ~ ^/api/containers/$ {
+        rewrite ^/api/containers/$ /api/containers permanent;
+    }
 # ===== LABEL STUDIO CONFIGURATION =====
-# Reihenfolge ist KRITISCH - spezifischere Pfade zuerst!
+# Simplified and corrected configuration
 
-# 1. Label Studio Static Files - HÖCHSTE PRIORITÄT
-location ~ ^/labelstudio/static/(.*)$ {
-    # Direkte Weiterleitung ohne trailing slash issues
-    proxy_pass http://wago-label-studio:8080/static/$1;
+# 1. Health check
+location /labelstudio/health/ {
+    proxy_pass http://wago-label-studio:8080/health/;
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Host $host;
-    
-    # KEINE Redirects für static files
-    proxy_redirect off;
-    
-    # Caching für bessere Performance
-    expires 1d;
-    add_header Cache-Control "public, max-age=86400";
-    
-    # CORS für static files
-    add_header Access-Control-Allow-Origin "*" always;
-    add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
-    
-    # Debug logging
-    access_log /var/log/nginx/labelstudio-static.log;
-    error_log /var/log/nginx/labelstudio-static-error.log warn;
+    proxy_set_header X-Script-Name /labelstudio;
 }
 
-# 2. Label Studio Media Files (wenn verwendet)
-#location ~ ^/labelstudio/media/(.*)$ {
-#    proxy_pass http://wago-label-studio:8080/media/$1;
-#    proxy_set_header Host $host;
-#    proxy_set_header X-Real-IP $remote_addr;
-#    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-#    proxy_set_header X-Forwarded-Proto $scheme;
-#    proxy_set_header X-Forwarded-Host $host;
-#    proxy_redirect off;
-#    
-#    # Media files caching
-#   expires 7d;
-#    add_header Cache-Control "public, max-age=604800";
-#}
+# 2. Static files
+location /labelstudio/static/ {
+    proxy_pass http://wago-label-studio:8080/static/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Script-Name /labelstudio;
+    expires 1d;
+    add_header Cache-Control "public, max-age=86400";
+}
 
-# 3. Label Studio API Routes
+# 3. Media files
+location /labelstudio/media/ {
+    proxy_pass http://wago-label-studio:8080/media/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Script-Name /labelstudio;
+    expires 7d;
+    add_header Cache-Control "public, max-age=604800";
+}
+
+# 4. API routes
 location /labelstudio/api/ {
     proxy_pass http://wago-label-studio:8080/api/;
     proxy_set_header Host $host;
@@ -77,32 +76,20 @@ location /labelstudio/api/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Host $host;
-    
-    # API spezifische Headers
+    proxy_set_header X-Script-Name /labelstudio;
+    proxy_set_header X-Forwarded-Prefix /labelstudio;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
-    proxy_redirect off;
     
-    # CORS für API
-    add_header Access-Control-Allow-Origin "*" always;
-    add_header Access-Control-Allow-Credentials "true" always;
-    add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, PATCH" always;
-    add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With, X-CSRFToken, Accept" always;
-    
-    # OPTIONS preflight handling
-    if ($request_method = 'OPTIONS') {
-        add_header Access-Control-Allow-Origin "*";
-        add_header Access-Control-Allow-Credentials "true";
-        add_header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, PATCH";
-        add_header Access-Control-Allow-Headers "Authorization, Content-Type, X-Requested-With, X-CSRFToken, Accept";
-        add_header Content-Length 0;
-        add_header Content-Type "text/plain";
-        return 204;
-    }
+    # Security headers for iframe embedding
+    proxy_hide_header X-Frame-Options;
+    proxy_hide_header Content-Security-Policy;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header Content-Security-Policy "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors 'self' https://$host;" always;
 }
 
-# 4. Label Studio WebSocket
+# 5. WebSocket support
 location /labelstudio/ws/ {
     proxy_pass http://wago-label-studio:8080/ws/;
     proxy_set_header Host $host;
@@ -110,19 +97,15 @@ location /labelstudio/ws/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Host $host;
-    
-    # WebSocket spezifisch
+    proxy_set_header X-Script-Name /labelstudio;
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
-    proxy_redirect off;
-    
-    # WebSocket timeout settings
     proxy_read_timeout 86400;
     proxy_send_timeout 86400;
 }
 
-# 5. Label Studio Main App - MUSS NACH allen spezifischen Pfaden stehen
+# 6. Main Label Studio application - MUST be last
 location /labelstudio/ {
     proxy_pass http://wago-label-studio:8080/;
     proxy_set_header Host $host;
@@ -130,30 +113,17 @@ location /labelstudio/ {
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-Host $host;
-    
-    # Base URL Unterstützung
     proxy_set_header X-Script-Name /labelstudio;
     proxy_set_header X-Forwarded-Prefix /labelstudio;
-    
-    # Application spezifisch
     proxy_http_version 1.1;
     proxy_set_header Upgrade $http_upgrade;
     proxy_set_header Connection "upgrade";
-    proxy_redirect off;
     
-    # Cookie Pfad für Sub-Path
-    proxy_cookie_path / /labelstudio/;
-    
-    # Security Headers für iframe embedding
+    # Security headers for iframe embedding
     proxy_hide_header X-Frame-Options;
+    proxy_hide_header Content-Security-Policy;
     add_header X-Frame-Options "SAMEORIGIN" always;
-    
-    # CSP für iframe embedding - sehr permissiv
-    add_header Content-Security-Policy "default-src 'self' 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors 'self' https://$host; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline';" always;
-    
-    # Debug logging
-    access_log /var/log/nginx/labelstudio-main.log;
-    error_log /var/log/nginx/labelstudio-main-error.log warn;
+    add_header Content-Security-Policy "default-src * 'unsafe-inline' 'unsafe-eval' data: blob:; frame-ancestors 'self' https://$host;" always;
 }
     # ===== NETRON CONFIGURATION =====
     location /netron/ {
@@ -161,14 +131,18 @@ location /labelstudio/ {
         try_files $uri =404;
         expires 1h;
         add_header Cache-Control "public, max-age=3600";
+        access_log /var/log/nginx/netron.log;
+        error_log /var/log/nginx/netron-error.log debug;
     }
-    
+
     # ===== MAIN APPLICATION =====
     location / {
         root /usr/share/nginx/html;
         try_files $uri /index.html;
         expires 1h;
         add_header Cache-Control "public, max-age=3600";
+        access_log /var/log/nginx/spa.log;
+        error_log /var/log/nginx/spa-error.log debug;
     }
 
     # ===== BACKEND API =====
@@ -179,6 +153,11 @@ location /labelstudio/ {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_ssl_verify off;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 300s;
+        proxy_send_timeout 300s;
+        access_log /var/log/nginx/api.log;
+        error_log /var/log/nginx/api-error.log debug;
     }
 
     # ===== AUDIO FILES =====
@@ -186,6 +165,8 @@ location /labelstudio/ {
         alias /app;
         autoindex off;
         expires 1h;
+        access_log /var/log/nginx/audio.log;
+        error_log /var/log/nginx/audio-error.log debug;
     }
 
     # ===== MQTT WEBSOCKET =====
@@ -196,19 +177,27 @@ location /labelstudio/ {
         proxy_set_header Connection "upgrade";
         proxy_set_header Host $host;
         proxy_ssl_verify off;
+        access_log /var/log/nginx/mqtt.log;
+        error_log /var/log/nginx/mqtt-error.log debug;
     }
 
-    # ===== VIDEO STREAMING =====
-    location /api/video/stream {
-        proxy_pass http://wago-ai-suite-backend:3042/api/video/stream;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_ssl_verify off;
-        proxy_buffering off; 
-        proxy_pass_request_headers on;
-    }
+	location /api/video/stream {
+		proxy_pass http://wago-ai-suite-backend:3042/api/video/stream;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_ssl_verify off;
+		proxy_buffering off; # Keep off for MJPEG to avoid chunking issues
+		proxy_pass_request_headers on;
+		proxy_read_timeout 120s; # Match backend timeout (was 60s default)
+		proxy_connect_timeout 30s; # Allow time for initial connect
+		proxy_send_timeout 120s; # Ensure send doesn’t timeout
+		proxy_http_version 1.1; # Enable HTTP/1.1 for keep-alive
+		proxy_set_header Connection "keep-alive"; # Persist connection
+		access_log /var/log/nginx/video-stream.log;
+		error_log /var/log/nginx/video-stream-error.log debug;
+	}
 
     # ===== GRAFANA =====
     location /grafana/ {
@@ -218,10 +207,11 @@ location /labelstudio/ {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
-        
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        access_log /var/log/nginx/grafana.log;
+        error_log /var/log/nginx/grafana-error.log debug;
     }
 
     # ===== JUPYTER =====
@@ -234,6 +224,8 @@ location /labelstudio/ {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        access_log /var/log/nginx/jupyter.log;
+        error_log /var/log/nginx/jupyter-error.log debug;
     }
 
     # ===== NODE-RED =====
@@ -244,10 +236,11 @@ location /labelstudio/ {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
-        
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        access_log /var/log/nginx/nodered.log;
+        error_log /var/log/nginx/nodered-error.log debug;
     }
 
     # ===== N8N =====
@@ -259,10 +252,11 @@ location /labelstudio/ {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_set_header X-Forwarded-Host $host;
-        
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
+        access_log /var/log/nginx/n8n.log;
+        error_log /var/log/nginx/n8n-error.log debug;
     }
 
     # ===== REMOTE INFERENCE =====
@@ -272,5 +266,18 @@ location /labelstudio/ {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        access_log /var/log/nginx/remote.log;
+        error_log /var/log/nginx/remote-error.log debug;
     }
+	location /api/remote/video/ {
+		proxy_pass http://$INFERENCE_URL:8042/video/;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_read_timeout 60s;
+		proxy_buffering off;  
+		access_log /var/log/nginx/video.log combined;
+		error_log /var/log/nginx/video-error.log debug;
+	}
 }

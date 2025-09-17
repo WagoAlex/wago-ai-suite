@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { 
-  Typography, 
-  Box, 
-  Switch, 
-  FormControlLabel, 
-  Alert, 
-  Button, 
+import {
+  Typography,
+  Box,
+  Switch,
+  FormControlLabel,
+  Alert,
+  Button,
   CircularProgress,
   Chip,
   Card,
@@ -19,23 +19,23 @@ function LabelStudio() {
       const savedState = localStorage.getItem('isLabelStudioEnabled');
       return savedState ? JSON.parse(savedState) : false;
     } catch (e) {
-      console.error('Failed to parse isLabelStudioEnabled from localStorage:', e);
+      console.error('[LabelStudio] [Error] Failed to parse isLabelStudioEnabled from localStorage:', e);
       return false;
     }
   });
-
+  const [authToken, setAuthToken] = useState(localStorage.getItem('labelStudioToken') || null);
   const [labelStudioContainerName, setLabelStudioContainerName] = useState(null);
   const [containerStatus, setContainerStatus] = useState('unknown');
   const [errorMessage, setErrorMessage] = useState(null);
   const [isUpdating, setIsUpdating] = useState(false);
   const [containerHint, setContainerHint] = useState(null);
-  const [embedMode, setEmbedMode] = useState(true);
+  const [embedMode, setEmbedMode] = useState(true);  // Always true, no toggle
   const [iframeLoaded, setIframeLoaded] = useState(false);
   const [loadingProgress, setLoadingProgress] = useState(0);
   const [iframeError, setIframeError] = useState(null);
   const [retryCount, setRetryCount] = useState(0);
+  const [loginAttempted, setLoginAttempted] = useState(false);
   const iframeRef = useRef(null);
-  
   const labelStudioUrl = '/labelstudio/';
   const maxRetries = 3;
 
@@ -46,50 +46,51 @@ function LabelStudio() {
   // Simulate loading progress with timeout protection
   useEffect(() => {
     if (isLabelStudioEnabled && embedMode && !iframeLoaded && containerStatus === 'running') {
+      console.debug('[LabelStudio] [Progress] Starting loading simulation for iframe');
       const interval = setInterval(() => {
         setLoadingProgress(prev => {
           if (prev >= 90) {
             clearInterval(interval);
+            console.info('[LabelStudio] [Progress] Loading simulation completed at 90% (waiting for iframe load)');
             return 90;
           }
           return prev + 10;
         });
       }, 500);
-      
-      // Timeout protection - if not loaded after 30 seconds, show error
+
       const timeout = setTimeout(() => {
         if (!iframeLoaded) {
-          setIframeError('Label Studio took too long to load. Please try refreshing or check if the container is properly configured.');
+          console.warn('[LabelStudio] [Error] Loading timeout reached after 30 seconds');
+          setIframeError('Label Studio took too long to load. This might be a container configuration issue.');
           clearInterval(interval);
         }
       }, 30000);
-      
+
       return () => {
         clearInterval(interval);
         clearTimeout(timeout);
+        console.debug('[LabelStudio] [Progress] Cleaned up loading interval and timeout');
       };
     }
   }, [isLabelStudioEnabled, embedMode, iframeLoaded, containerStatus, retryCount]);
 
   const fetchContainerInfo = async () => {
     try {
+      console.debug('[LabelStudio] [Fetch] Fetching container info');
       const response = await axios.get('/api/labelstudio/container-name');
       const data = response.data;
-      
       setLabelStudioContainerName(data.containerName);
       setContainerHint(data.hint || null);
-
       const statusResponse = await axios.get(`/api/containers/${data.containerName}/status`, {
         params: { type: 'local' }
       });
       setContainerStatus(statusResponse.data.status);
-      
-      // Clear errors if container is running properly
+      console.info('[LabelStudio] [Fetch] Container status fetched:', statusResponse.data.status);
       if (statusResponse.data.status === 'running') {
         setErrorMessage(null);
       }
     } catch (error) {
-      console.error('Error fetching Label Studio container info:', error);
+      console.error('[LabelStudio] [Error] Error fetching Label Studio container info:', error);
       setErrorMessage(error.response?.data?.hint || 'Failed to fetch container information');
       setContainerStatus('unknown');
     }
@@ -98,7 +99,11 @@ function LabelStudio() {
   useEffect(() => {
     fetchContainerInfo();
     const interval = setInterval(fetchContainerInfo, 5000);
-    return () => clearInterval(interval);
+    console.debug('[LabelStudio] [Init] Started container info polling interval');
+    return () => {
+      clearInterval(interval);
+      console.debug('[LabelStudio] [Cleanup] Stopped container info polling interval');
+    };
   }, []);
 
   const handleToggle = async (event) => {
@@ -110,16 +115,14 @@ function LabelStudio() {
     setIframeLoaded(false);
     setLoadingProgress(0);
     setRetryCount(0);
-    
+    setLoginAttempted(false);
     try {
+      console.debug('[LabelStudio] [Toggle] Updating Label Studio config:', { enabled });
       const response = await axios.post('/api/labelstudio/config', { enabled });
-      console.log('Label Studio config updated:', response.data);
-      
+      console.info('[LabelStudio] [Toggle] Label Studio config updated:', response.data);
       if (response.data.hint) {
         setContainerHint(response.data.hint);
       }
-      
-      // Wait a bit for container to start
       if (enabled) {
         setTimeout(() => {
           fetchContainerInfo();
@@ -128,7 +131,7 @@ function LabelStudio() {
         await fetchContainerInfo();
       }
     } catch (error) {
-      console.error('Error updating Label Studio config:', error);
+      console.error('[LabelStudio] [Error] Error updating Label Studio config:', error);
       const errorMessage = error.response?.data?.error || 'Failed to update Label Studio configuration';
       const errorDetails = error.response?.data?.details || '';
       setErrorMessage(`${errorMessage}${errorDetails ? `: ${errorDetails}` : ''}`);
@@ -150,43 +153,117 @@ function LabelStudio() {
   };
 
   const getStatusChip = () => {
-    const color = containerStatus === 'running' ? 'success' : 
+    const color = containerStatus === 'running' ? 'success' :
                   containerStatus === 'restarting' ? 'warning' : 'error';
     return (
-      <Chip 
-        label={containerStatus.toUpperCase()} 
-        color={color} 
+      <Chip
+        label={containerStatus.toUpperCase()}
+        color={color}
         size="small"
         variant="outlined"
       />
     );
   };
 
-  const openLabelStudioInNewTab = () => {
-    window.open(labelStudioUrl, '_blank', 'noopener,noreferrer');
-  };
-
   const handleIframeLoad = () => {
+    console.debug('[LabelStudio] [Iframe] Iframe load event triggered');
     setIframeLoaded(true);
     setLoadingProgress(100);
     setIframeError(null);
     setRetryCount(0);
-    console.log('Label Studio iframe loaded successfully');
+    console.info('[LabelStudio] [Iframe] Label Studio iframe loaded successfully');
+    if (!loginAttempted) {
+      setTimeout(() => {
+        attemptAutoLogin();
+      }, 1000);
+    }
   };
 
+const attemptAutoLogin = () => {
+    console.debug('[LabelStudio] [AutoLogin] Attempting auto-login');
+    try {
+        if (!iframeRef.current) {
+            console.warn('[LabelStudio] [AutoLogin] Iframe ref is null during auto-login');
+            return;
+        }
+        
+        const iframeWindow = iframeRef.current.contentWindow;
+        if (!iframeWindow) {
+            console.warn('[LabelStudio] [AutoLogin] Iframe contentWindow is null');
+            return;
+        }
+
+        let iframeDoc;
+        try {
+            iframeDoc = iframeWindow.document;
+        } catch (e) {
+            console.warn('[LabelStudio] [AutoLogin] Cannot access iframe document:', e);
+            return;
+        }
+
+        setLoginAttempted(true);
+
+        // Look for login form with updated selectors
+        const loginForm = iframeDoc.querySelector('form[action*="login"]') || 
+                         iframeDoc.querySelector('form[method="post"]') ||
+                         iframeDoc.querySelector('form.login-form');
+                         
+        const emailInput = iframeDoc.querySelector('input[name="email"]') || 
+                          iframeDoc.querySelector('input[name="username"]') ||
+                          iframeDoc.querySelector('input[type="email"]') ||
+                          iframeDoc.querySelector('input[placeholder*="email"]');
+                          
+        const passwordInput = iframeDoc.querySelector('input[name="password"]') ||
+                             iframeDoc.querySelector('input[type="password"]');
+
+        if (loginForm && emailInput && passwordInput) {
+            console.debug('[LabelStudio] [AutoLogin] Found login form elements');
+            
+            emailInput.value = 'alexander.fugmann@wago.com';
+            passwordInput.value = 'wagowago';
+            
+            // Trigger events
+            ['input', 'change', 'keyup'].forEach(eventType => {
+                const event = new Event(eventType, { bubbles: true });
+                emailInput.dispatchEvent(event);
+                passwordInput.dispatchEvent(event);
+            });
+
+            const submitButton = loginForm.querySelector('button[type="submit"]') ||
+                               loginForm.querySelector('input[type="submit"]') ||
+                               loginForm.querySelector('button.btn-primary') ||
+                               loginForm.querySelector('button');
+
+            if (submitButton) {
+                setTimeout(() => {
+                    try {
+                        submitButton.click();
+                        console.debug('[LabelStudio] [AutoLogin] Submit button clicked');
+                    } catch (e) {
+                        loginForm.submit();
+                        console.debug('[LabelStudio] [AutoLogin] Form submitted directly');
+                    }
+                }, 100);
+            }
+        } else {
+            console.debug('[LabelStudio] [AutoLogin] Login form elements not found, checking if already logged in');
+        }
+    } catch (e) {
+        console.error('[LabelStudio] [AutoLogin] Auto-login error:', e);
+    }
+};
+
   const handleIframeError = (e) => {
-    console.error('Label Studio iframe error:', e);
+    console.error('[LabelStudio] [Iframe] Label Studio iframe error:', e);
     setIframeLoaded(false);
     setLoadingProgress(0);
-    
     if (retryCount < maxRetries) {
       setRetryCount(prev => prev + 1);
       setIframeError(`Loading failed (attempt ${retryCount + 1}/${maxRetries}). Retrying...`);
-      
-      // Retry after a delay
       setTimeout(() => {
         if (iframeRef.current) {
-          iframeRef.current.src = labelStudioUrl + '?v=' + Date.now(); // Add cache buster
+          console.debug('[LabelStudio] [Iframe] Retrying iframe load');
+          iframeRef.current.src = labelStudioUrl + '?v=' + Date.now();
         }
       }, 2000);
     } else {
@@ -199,7 +276,7 @@ function LabelStudio() {
     setIframeLoaded(false);
     setLoadingProgress(0);
     setRetryCount(0);
-    
+    setLoginAttempted(false);
     if (iframeRef.current) {
       iframeRef.current.src = labelStudioUrl + '?v=' + Date.now();
     }
@@ -210,8 +287,7 @@ function LabelStudio() {
       <Typography variant="h6" gutterBottom>
         Label Studio - Data Annotation Platform
       </Typography>
-
-      {/* Control Panel */}
+      
       <Card sx={{ mb: 2 }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
@@ -225,7 +301,7 @@ function LabelStudio() {
               }
               label="Enable Label Studio"
             />
-            
+
             {labelStudioContainerName && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <Typography variant="body2">
@@ -243,7 +319,7 @@ function LabelStudio() {
                 {getStatusChip()}
               </Box>
             )}
-            
+
             {isUpdating && (
               <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                 <CircularProgress size={16} />
@@ -251,34 +327,12 @@ function LabelStudio() {
               </Box>
             )}
           </Box>
-          
           {isLabelStudioEnabled && containerStatus === 'running' && (
             <Box sx={{ mt: 2, display: 'flex', gap: 2, alignItems: 'center', flexWrap: 'wrap' }}>
-              <FormControlLabel
-                control={
-                  <Switch
-                    checked={embedMode}
-                    onChange={(e) => {
-                      setEmbedMode(e.target.checked);
-                      setIframeLoaded(false);
-                      setLoadingProgress(0);
-                      setIframeError(null);
-                      setRetryCount(0);
-                    }}
-                  />
-                }
-                label="Embed Mode"
-              />
-              <Button 
-                variant="outlined" 
-                onClick={openLabelStudioInNewTab}
-                size="small"
-              >
-                Open in New Tab
-              </Button>
+              {/* Removed Embed Mode switch as per request */}
               {iframeError && (
-                <Button 
-                  variant="outlined" 
+                <Button
+                  variant="outlined"
                   onClick={retryIframe}
                   size="small"
                   color="warning"
@@ -290,154 +344,123 @@ function LabelStudio() {
           )}
         </CardContent>
       </Card>
-      
-      {/* Container hint */}
+
       {containerHint && (
         <Alert severity="info" sx={{ mb: 2 }}>
           {containerHint}
         </Alert>
       )}
-      
-      {/* Error messages */}
+
       {errorMessage && (
         <Alert severity="error" sx={{ mb: 2 }}>
           {errorMessage}
         </Alert>
       )}
-      
+
       {iframeError && (
         <Alert severity="warning" sx={{ mb: 2 }}>
           {iframeError}
         </Alert>
       )}
-      
-      {/* Main content area */}
+
       {isLabelStudioEnabled && containerStatus === 'running' && (
         <Card>
           <CardContent sx={{ p: 0 }}>
-            {embedMode ? (
-              <Box sx={{ position: 'relative', minHeight: '600px' }}>
-                {/* Loading overlay */}
-                {!iframeLoaded && !iframeError && (
+            {/* Embed mode always active, removed non-embed content */}
+            <Box sx={{ position: 'relative', minHeight: '600px' }}>
+              {!iframeLoaded && !iframeError && (
+                <Box
+                  sx={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    zIndex: 1000,
+                    borderRadius: 1,
+                    minHeight: '600px',
+                  }}
+                >
+                  <CircularProgress size={40} sx={{ mb: 2 }} />
+                  <Typography variant="body2" color="text.secondary">
+                    Loading Label Studio... {loadingProgress}%
+                  </Typography>
+                  {retryCount > 0 && (
+                    <Typography variant="caption" color="text.secondary">
+                      Retry attempt: {retryCount}/{maxRetries}
+                    </Typography>
+                  )}
                   <Box
                     sx={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      bottom: 0,
-                      backgroundColor: 'rgba(255, 255, 255, 0.9)',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'center',
-                      alignItems: 'center',
-                      zIndex: 1000,
-                      borderRadius: 1,
-                      minHeight: '600px',
+                      width: 200,
+                      height: 4,
+                      backgroundColor: 'grey.300',
+                      borderRadius: 2,
+                      mt: 1,
+                      overflow: 'hidden',
                     }}
                   >
-                    <CircularProgress size={40} sx={{ mb: 2 }} />
-                    <Typography variant="body2" color="text.secondary">
-                      Loading Label Studio... {loadingProgress}%
-                    </Typography>
-                    {retryCount > 0 && (
-                      <Typography variant="caption" color="text.secondary">
-                        Retry attempt: {retryCount}/{maxRetries}
-                      </Typography>
-                    )}
                     <Box
                       sx={{
-                        width: 200,
-                        height: 4,
-                        backgroundColor: 'grey.300',
-                        borderRadius: 2,
-                        mt: 1,
-                        overflow: 'hidden',
+                        width: `${loadingProgress}%`,
+                        height: '100%',
+                        backgroundColor: 'primary.main',
+                        transition: 'width 0.3s ease',
                       }}
+                    />
+                  </Box>
+                </Box>
+              )}
+
+              <iframe
+                ref={iframeRef}
+                src={labelStudioUrl}
+                width="100%"
+                height="800"
+                frameBorder="0"
+                title="Label Studio"
+                onLoad={handleIframeLoad}
+                onError={handleIframeError}
+                style={{
+                  border: 'none',
+                  borderRadius: '4px',
+                  backgroundColor: '#ffffff',
+                  minHeight: '600px',
+                  display: iframeError ? 'none' : 'block',
+                }}
+                allow="fullscreen; clipboard-read; clipboard-write"
+              />
+
+              {iframeError && (
+                <Box sx={{ textAlign: 'center', py: 8, minHeight: '600px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+                  <Typography variant="h6" color="error" gutterBottom>
+                    Failed to Load Label Studio
+                  </Typography>
+                  <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+                    {iframeError}
+                  </Typography>
+                  <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
+                    <Button
+                      variant="contained"
+                      onClick={retryIframe}
+                      color="primary"
                     >
-                      <Box
-                        sx={{
-                          width: `${loadingProgress}%`,
-                          height: '100%',
-                          backgroundColor: 'primary.main',
-                          transition: 'width 0.3s ease',
-                        }}
-                      />
-                    </Box>
+                      Retry
+                    </Button>
+              
                   </Box>
-                )}
-                
-                <iframe
-                  ref={iframeRef}
-                  src={labelStudioUrl}
-                  width="100%"
-                  height="800"
-                  frameBorder="0"
-                  title="Label Studio"
-                  onLoad={handleIframeLoad}
-                  onError={handleIframeError}
-                  style={{
-                    border: 'none',
-                    borderRadius: '4px',
-                    backgroundColor: '#ffffff',
-                    minHeight: '600px',
-                    display: iframeError ? 'none' : 'block',
-                  }}
-                  // Minimal sandbox - nur was absolut nötig ist
-                  sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals allow-downloads"
-                  allow="fullscreen; clipboard-read; clipboard-write; camera; microphone"
-                />
-                
-                {/* Error state */}
-                {iframeError && (
-                  <Box sx={{ textAlign: 'center', py: 8, minHeight: '600px', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
-                    <Typography variant="h6" color="error" gutterBottom>
-                      Failed to Load Label Studio
-                    </Typography>
-                    <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-                      {iframeError}
-                    </Typography>
-                    <Box sx={{ display: 'flex', gap: 2, justifyContent: 'center' }}>
-                      <Button 
-                        variant="contained" 
-                        onClick={retryIframe}
-                        color="primary"
-                      >
-                        Retry
-                      </Button>
-                      <Button 
-                        variant="outlined" 
-                        onClick={openLabelStudioInNewTab}
-                      >
-                        Open in New Tab
-                      </Button>
-                    </Box>
-                  </Box>
-                )}
-              </Box>
-            ) : (
-              <Box sx={{ textAlign: 'center', py: 8 }}>
-                <Typography variant="h6" gutterBottom>
-                  Label Studio is Running
-                </Typography>
-                <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-                  Access Label Studio in a new tab for the full experience
-                </Typography>
-                <Button 
-                  variant="contained" 
-                  onClick={openLabelStudioInNewTab}
-                  size="large"
-                  sx={{ minWidth: 200 }}
-                >
-                  Open Label Studio
-                </Button>
-              </Box>
-            )}
+                </Box>
+              )}
+            </Box>
           </CardContent>
         </Card>
       )}
-      
-      {/* Help text when container is not running */}
+
       {isLabelStudioEnabled && containerStatus !== 'running' && (
         <Alert severity="warning" sx={{ mt: 2 }}>
           Label Studio container is not running. Please wait for it to start or check the container status.

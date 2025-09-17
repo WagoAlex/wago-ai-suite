@@ -1,23 +1,28 @@
 // config.js
-export const SERVER_NAME = process.env.REACT_APP_SERVER_NAME || 'localhost';
-export const INFERENCE_URL = process.env.REACT_APP_INFERENCE_URL || 'localhost';
+export const SERVER_NAME	= process.env.REACT_APP_SERVER_NAME || 'localhost';
+export const INFERENCE_URL 	= process.env.REACT_APP_INFERENCE_URL || 'localhost';
+
+export const BACKEND_PORT 	= process.env.REACT_APP_BACKEND_PORT || '3042';
+export const INFERENCE_PORT = process.env.REACT_APP_INFERENCE_PORT || '8042';
+export const RTSP_URL 		= process.env.REACT_APP_RTSP_URL || 'rtsp://user:pw@192.168.2.17:554/h264Preview_01_main'
 // MQTT Broker URLs
-export const MQTT_BROKER_URL = `wss://${SERVER_NAME}/mqtt`;
-export const MQTT_BROKER_URL_DIRECT = `wss://${SERVER_NAME}:9001`;
-export const MQTT_BROKER_URL_MQTTS = `mqtts://${SERVER_NAME}:8883`;
-export const MQTT_BROKER_URL_WS = `ws://${SERVER_NAME}:1883`;
+export const MQTT_BROKER_URL 			= `wss://${SERVER_NAME}/mqtt`;
+export const MQTT_BROKER_URL_DIRECT 	= `wss://${SERVER_NAME}:9001`;
+export const MQTT_BROKER_URL_MQTTS 		= `mqtts://${SERVER_NAME}:8883`;
+export const MQTT_BROKER_URL_WS 		= `ws://${SERVER_NAME}:1883`;
+export const MQTT_INFERENCE_TOPIC 		= `inference/#`;
 
 // N8N Configuration
-export const N8N_API_URL = process.env.REACT_APP_N8N_API_URL || '/n8n';
-export const N8N_REST_API_KEY = process.env.REACT_APP_N8N_REST_API_KEY || '';
-export const N8N_WEBHOOKS = process.env.REACT_APP_WEBHOOK_URL
+export const N8N_API_URL 		= process.env.REACT_APP_N8N_API_URL || '/n8n';
+export const N8N_REST_API_KEY 	= process.env.REACT_APP_N8N_REST_API_KEY || '';
+export const N8N_WEBHOOKS 		= process.env.REACT_APP_WEBHOOK_URL
   ? process.env.REACT_APP_WEBHOOK_URL.split(' ').map(url => 
       url.startsWith('http') ? `${N8N_API_URL}${new URL(url).pathname}` : url
     )
   : [
       `${N8N_API_URL}/webhook-test/invoke_recording`,
       `${N8N_API_URL}/webhook-test/invoke_audio`,
-      `${N8N_API_URL}/webhook/e104e40e-6134-4825-a6f0-8a646d882662/chat`,
+      `${N8N_API_URL}/webhook/your-uuid/chat`,
     ];
 
 // MQTT Topics
@@ -39,6 +44,7 @@ export const MQTT_PROGRESS_TOPIC =
   process.env.REACT_APP_MQTT_PROGRESS_TOPIC || 'agent/audio/progress';
 export const START_PAYLOAD =
   process.env.REACT_APP_START_PAYLOAD || '{"command": "start"}';
+
 
 // Version
 export const VERSION = process.env.REACT_APP_VERSION || '1.0';

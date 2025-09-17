@@ -43,17 +43,14 @@ function Home() {
           gap: 2, // Consistent spacing
         }}
       >
-        <Button variant="contained" component={Link} to="/dataflow">
-          Explore Dataflow
+        <Button variant="contained" component={Link} to="/visual-inference">
+          Explore Visual-Inference
         </Button>
-        <Button variant="contained" component={Link} to="/conversation">
-          Start a Conversation
-        </Button>
-        <Button variant="contained" component={Link} to="/chat">
-          Start Chatting with Your Machine
+        <Button variant="contained" component={Link} to="/automation">
+          Start an automation
         </Button>
         <Button variant="contained" component={Link} to="/visualization">
-          View Visualizations
+          WAGO App Analytics - Grafana
         </Button>
         <Button variant="contained" component={Link} to="/status">
           Check Status

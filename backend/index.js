@@ -1,31 +1,117 @@
+/**
+ * backend index.js
+ */
+
 const express = require('express');
 const https = require('https');
+const http = require('http');
 const multer = require('multer');
 const upload = multer({ storage: multer.memoryStorage() });
 const fs = require('fs').promises;
 const fsp = require('fs');
 const path = require('path');
 const Docker = require('dockerode');
-const port = process.env.PORT || 3042;
+const yaml = require('js-yaml');
+const winston = require('winston');
+const { createProxyMiddleware } = require('http-proxy-middleware');
+const port = process.env.BACKEND_PORT || 3042;
+const httpsPort = process.env.BACKEND_HTTPS_PORT || 3443;
+const portInference = process.env.INFERENCE_PORT || 8042;
 const { spawn } = require('child_process');
+const { debounce } = require('lodash');
 const app = express();
 
+/**
+ * Ensures the logs directory exists and is writable.
+ */
+const logsDir = '/app/logs';
+const requestTimestamps = new Map(); // Track client IPs and timestamps
+const THROTTLE_WINDOW = 10000; // 10s window
+const MAX_REQUESTS = 50; // Max 50 requests per window
+const debouncedInfo  = debounce((...args) => logger.info(...args), 20000, { leading: true });
+const debouncedWarn  = debounce((...args) => logger.info(...args), 15000, { leading: true });
+const debouncedError = debounce((...args) => logger.error(...args), 10000, { leading: true });
+try {
+  if (!fsp.existsSync(logsDir)) {
+    fsp.mkdirSync(logsDir, { recursive: true, mode: 0o755 });
+    console.log(`Created logs directory: ${logsDir}`);
+  } else {
+    console.log(`Logs directory already exists: ${logsDir}`);
+  }
+  try {
+    fsp.accessSync(logsDir, fsp.constants.W_OK);
+    console.log(`Logs directory is writable: ${logsDir}`);
+  } catch (err) {
+    console.error(`Logs directory not writable: ${logsDir}`, err);
+  }
+} catch (err) {
+  console.error('Failed to create or access logs directory:', err);
+}
+
+/**
+ * Configures Winston logger for request and error logging.
+ */
+const logger = winston.createLogger({
+  level: 'info',
+  format: winston.format.combine(
+    winston.format.timestamp({ format: 'YYYY-MM-DD HH:mm:ss' }),
+    winston.format.errors({ stack: true }),
+    winston.format.json()
+  ),
+  transports: [
+    new winston.transports.Console(),
+    new winston.transports.File({ filename: path.join(logsDir, 'backend.log') })
+  ]
+});
+
+// Debounce stream-specific request log (60s window)
+const debouncedStreamRequestLog = debounce((req) => {
+  logger.info(`Request received: ${req.method} ${req.url}`, {
+    ip: req.ip,
+    query: req.query,
+    body: req.body
+  });
+}, 60000, { leading: true });
+
+// Update middleware for path-specific debouncing
+app.use((req, res, next) => {
+  if (req.url.startsWith('/api/video/stream')) {
+    debouncedStreamRequestLog(req);
+  } else {
+    logger.info(`Request received: ${req.method} ${req.url}`, {
+      ip: req.ip,
+      query: req.query,
+      body: req.body
+    });
+  }
+  next();
+});
 // Define local Docker instance
 const localDocker = new Docker({ socketPath: '/var/run/docker.sock' });
 
-// Define Docker connections for inference use case
+// Cache Docker instances for reuse (key: 'local' or 'remote:host:port')
+const dockerInstanceCache = new Map();
+
+/**
+ * Defines Docker connections for local and remote inference.
+ */
 const dockerConnections = {
   local: localDocker,
   remote: (host, port) => {
-    console.log(`Creating remote Docker instance for ${host}:${port}`);
-    return new Docker({
-      host,
-      port,
-      ca: fsp.readFileSync('/etc/docker/certs/ca.pem'),
-      cert: fsp.readFileSync('/etc/docker/certs/client-cert.pem'),
-      key: fsp.readFileSync('/etc/docker/certs/client-key.pem'),
-      protocol: 'https',
-    });
+    const key = `remote:${host}:${port}`;
+    if (!dockerInstanceCache.has(key)) {
+      logger.info(`Creating and caching remote Docker instance for ${host}:${port}`);
+      const instance = new Docker({
+        host,
+        port,
+        ca: fsp.readFileSync('/etc/docker/certs/ca.pem'),
+        cert: fsp.readFileSync('/etc/docker/certs/client-cert.pem'),
+        key: fsp.readFileSync('/etc/docker/certs/client-key.pem'),
+        protocol: 'https',
+      });
+      dockerInstanceCache.set(key, instance);
+    }
+    return dockerInstanceCache.get(key);
   },
 };
 
@@ -34,14 +120,22 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  if (req.method === 'OPTIONS') {
+    logger.info('Handling CORS preflight request', { method: req.method, url: req.url });
+    return res.sendStatus(200);
+  }
   next();
 });
 
 // Parse JSON bodies
 app.use(express.json());
 
-// Helper function to select Docker instance
+/**
+ * Selects the appropriate Docker instance based on server type.
+ * @param {string} type - 'local' or 'remote'
+ * @param {string} remoteInferenceUrl - URL for remote Docker host
+ * @returns {Docker} Docker instance
+ */
 const getDockerInstance = (type, remoteInferenceUrl) => {
   if (type === 'remote' && remoteInferenceUrl) {
     let host, port;
@@ -51,21 +145,31 @@ const getDockerInstance = (type, remoteInferenceUrl) => {
       host = url.hostname;
       port = url.port || 2376;
     } catch (e) {
-      console.error('Invalid remoteInferenceUrl format:', remoteInferenceUrl, e.message);
+      logger.error('Invalid remoteInferenceUrl format', { url: remoteInferenceUrl, error: e.message });
       const [hostPart, portPart] = remoteInferenceUrl.split(':');
       host = hostPart;
       port = portPart || 2376;
     }
-    console.log(`Using remote Docker instance: host=${host}, port=${port}`);
+    logger.info(`Using remote Docker instance: host=${host}, port=${port}`);
     return dockerConnections.remote(host, port);
   }
+  logger.info('Using local Docker instance');
   return dockerConnections.local;
 };
 
-// Function to identify inference containers
+/**
+ * Identifies inference containers by name pattern.
+ * @param {string} name - Container name
+ * @returns {boolean} True if container is for inference
+ */
 const isInferenceContainer = (name) => /wago-hailo/.test(name);
 
-// Send email function
+/**
+ * Sends an email using nodemailer.
+ * @param {string} to - Recipient email address
+ * @param {string} subject - Email subject
+ * @param {string} text - Email body
+ */
 async function sendEmail(to, subject, text) {
   const nodemailer = require('nodemailer');
   const transporter = nodemailer.createTransport({
@@ -77,19 +181,22 @@ async function sendEmail(to, subject, text) {
       pass: process.env.SMTP_PASS,
     },
   });
-
+  logger.info('Sending email', { to, subject });
   await transporter.sendMail({
     from: '"WAGO Inquiry" <no-reply@wago.com>',
     to,
     subject,
     text,
   });
+  logger.info('Email sent successfully', { to, subject });
 }
 
 // Contact form endpoint
 app.post('/api/contact', async (req, res) => {
   const { name, email, subject, message, type } = req.body;
+  logger.info('Contact form submission received', { name, email, subject, type });
   if (!name || !email || !subject || !message || !type) {
+    logger.warn('Missing required fields in contact form', { body: req.body });
     return res.status(400).json({ error: 'All fields are required' });
   }
   let recipient;
@@ -101,14 +208,91 @@ app.post('/api/contact', async (req, res) => {
       recipient = 'solutions@wago.com';
       break;
     default:
+      logger.warn('Invalid inquiry type', { type });
       return res.status(400).json({ error: 'Invalid inquiry type' });
   }
   try {
     await sendEmail(recipient, subject, `From: ${name} <${email}>\n\n${message}`);
+    logger.info('Contact form processed successfully', { recipient });
     res.status(200).json({ message: 'Inquiry sent successfully' });
   } catch (error) {
-    console.error('Error sending email:', error);
+    logger.error('Error sending email', { error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to send inquiry' });
+  }
+});
+
+// List all containers
+app.get('/api/containers', async (req, res) => {
+  const { inferenceServerType, remoteInferenceUrl } = req.query;
+  logger.info('Fetching container list', { inferenceServerType, remoteInferenceUrl });
+  try {
+    const dockerInstance = getDockerInstance(inferenceServerType, remoteInferenceUrl);
+    const containers = await dockerInstance.listContainers({ all: true });
+    const containerInfo = containers.map(container => ({
+      id: container.Id,
+      name: container.Names[0]?.replace(/^\//, '') || 'Unnamed',
+      status: container.State,
+      health: container.Status.includes('healthy') ? 'healthy' : container.Status.includes('unhealthy') ? 'unhealthy' : 'N/A',
+      image: container.Image,
+      created: container.Created,
+      isInference: isInferenceContainer(container.Names[0] || ''),
+    }));
+    // Apply server-side filtering based on container-patterns.yml
+    const configPath = path.join(__dirname, '../public/container-patterns.yml');
+    let patterns = ["00-30-de", "00-30-DE", "wago-", "mqtt-broker", "x-"];
+    try {
+      const configText = await fs.readFile(configPath, 'utf8');
+      const config = yaml.load(configText);
+      patterns = config.patterns || patterns;
+      logger.info('Loaded container patterns', { patterns });
+    } catch (error) {
+      logger.warn('Failed to load container-patterns.yml, using default patterns', { error: error.message });
+    }
+    const filteredContainers = containerInfo.filter(container =>
+      patterns.some(pattern => container.name.startsWith(pattern))
+    );
+    logger.info('Container list fetched successfully', { count: filteredContainers.length });
+    res.status(200).json(filteredContainers);
+  } catch (error) {
+    logger.error('Error fetching containers', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to fetch containers', details: error.message });
+  }
+});
+
+// Container status for specific container
+app.get('/api/containers/:name/status', async (req, res) => {
+  const { name } = req.params;
+  const { inferenceServerType, remoteInferenceUrl } = req.query;
+  logger.info('Fetching container status', { name, inferenceServerType, remoteInferenceUrl });
+  try {
+    const dockerInstance = isInferenceContainer(name)
+      ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
+      : localDocker;
+    const containers = await dockerInstance.listContainers({ all: true });
+    const targetContainer = containers.find(c => c.Names.some(n => n.replace(/^\//, '') === name));
+    if (!targetContainer) {
+      logger.warn('Container not found', { name });
+      return res.status(404).json({ error: `Container ${name} not found` });
+    }
+    const containerName = targetContainer.Names[0].replace(/^\//, '');
+    const containerInfo = await dockerInstance.getContainer(targetContainer.Id).inspect();
+    logger.info('Container status fetched', { containerName, status: containerInfo.State.Status });
+    res.status(200).json({
+      status: containerInfo.State.Status,
+      containerName,
+      health: containerInfo.State.Health?.Status || 'N/A'
+    });
+  } catch (error) {
+    logger.error('Error fetching container status', { name, error: error.message, stack: error.stack });
+    let statusCode = 500;
+    let errDetails = error.message;
+    if (error.json && error.json.message) {
+      errDetails = error.json.message;
+      if (errDetails.includes('No such container')) statusCode = 404;
+    } else if (error.message.includes('No such container')) {
+      statusCode = 404;
+    }
+    res.status(statusCode).json({ error: 'Failed to fetch container status', details: errDetails });
   }
 });
 
@@ -116,20 +300,31 @@ app.post('/api/contact', async (req, res) => {
 app.post('/api/containers/:name/start', async (req, res) => {
   const { name } = req.params;
   const { inferenceServerType, remoteInferenceUrl, source, rtspUrl } = req.body;
-  console.log(`Starting container: ${name} with source: ${source}, rtspUrl: ${rtspUrl || 'N/A'}`);
-
+  logger.info('Starting container', { name, source, rtspUrl, inferenceServerType });
   try {
     const dockerInstance = isInferenceContainer(name)
       ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
       : localDocker;
-
     const container = dockerInstance.getContainer(name);
+    // Verify container exists
+    await container.inspect();
     await container.start();
-    console.log(`Container ${name} started successfully`);
+    logger.info(`Container ${name} started successfully`);
     res.status(200).json({ message: `${name} started`, source, rtspUrl });
   } catch (error) {
-    console.error(`Error starting container ${name}:`, error.stack);
-    res.status(500).json({ error: 'Failed to start container', details: error.message });
+    logger.error(`Error starting container ${name}`, { error: error.message, stack: error.stack });
+    let statusCode = 500;
+    let errDetails = error.message;
+    if (error.json && error.json.message) {
+      errDetails = error.json.message;
+      if (errDetails.includes('No such container')) statusCode = 404;
+    } else if (error.message.includes('No such container')) {
+      statusCode = 404;
+    } else if (error.message.includes('already running')) {
+      statusCode = 304; // Not Modified
+      errDetails = 'Container is already running';
+    }
+    res.status(statusCode).json({ error: 'Failed to start container', details: errDetails });
   }
 });
 
@@ -137,1001 +332,292 @@ app.post('/api/containers/:name/start', async (req, res) => {
 app.post('/api/containers/:name/stop', async (req, res) => {
   const { name } = req.params;
   const { inferenceServerType, remoteInferenceUrl } = req.body;
-  console.log(`Stopping container: ${name}`);
-
+  logger.info('Stopping container', { name, inferenceServerType });
   try {
     const dockerInstance = isInferenceContainer(name)
       ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
       : localDocker;
-
     const container = dockerInstance.getContainer(name);
     await container.stop();
-    console.log(`Container ${name} stopped successfully`);
+    logger.info(`Container ${name} stopped successfully`);
     res.status(200).json({ message: `${name} stopped` });
   } catch (error) {
-    console.error(`Error stopping container ${name}:`, error.stack);
+    logger.error(`Error stopping container ${name}`, { error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to stop container', details: error.message });
   }
 });
-const previousStatuses = new Map();
 
-app.get('/api/containers/:name/status', async (req, res) => {
-  const { name } = req.params;
-  let { inferenceServerType, remoteInferenceUrl } = req.query;
-
-  // Default to 'local' if inferenceServerType is not provided
-  inferenceServerType = inferenceServerType || 'local';
-
-  console.log(`Fetching status for container: ${name} with type: ${inferenceServerType}, url: ${remoteInferenceUrl || 'N/A'}`);
-
-  try {
-    const dockerInstance = isInferenceContainer(name)
-      ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
-      : localDocker;
-
-    const container = dockerInstance.getContainer(name);
-    const data = await container.inspect();
-    const currentStatus = data.State.Status;
-
-    // Check previous status and log only on first check or status change
-    const previousStatus = previousStatuses.get(name);
-    if (previousStatus === undefined) {
-      console.log(`Container ${name} status: ${currentStatus} (first check)`);
-    } else if (currentStatus !== previousStatus) {
-      console.log(`Container ${name} status changed from ${previousStatus} to ${currentStatus}`);
-    }
-    // Update the Map with the current status
-    previousStatuses.set(name, currentStatus);
-
-    res.status(200).json({
-      running: data.State.Running,
-      status: currentStatus,
-      containerName: data.Name.replace(/^\//, ''),
-    });
-  } catch (error) {
-    console.error(`Error fetching status for container ${name}:`, error.stack);
-    if (error.statusCode === 404) {
-      res.status(404).json({ error: 'Container not found' });
-    } else {
-      res.status(500).json({ error: 'Failed to fetch container status', details: error.message });
-    }
-  }
-});
-
-// Get container logs
+// Container logs
 app.get('/api/containers/:name/logs', async (req, res) => {
   const { name } = req.params;
-  const { inferenceServerType, remoteInferenceUrl, lines = 20 } = req.query;
-  console.log(`Fetching logs for container: ${name}, lines: ${lines}`);
-
+  const { inferenceServerType, remoteInferenceUrl, lines, since } = req.query;
+  logger.info('Fetching container logs', { name, inferenceServerType, remoteInferenceUrl, lines, since });
   try {
     const dockerInstance = isInferenceContainer(name)
       ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
       : localDocker;
-
     const container = dockerInstance.getContainer(name);
-    await container.inspect().catch((err) => {
-      if (err.statusCode === 404) throw new Error('Container not found');
-      throw err;
-    });
-    const logs = await container.logs({
+    const logsBuffer = await container.logs({
+      follow: false, // Explicit batch mode for tail/lines
       stdout: true,
       stderr: true,
-      tail: parseInt(lines),
-    });
-    console.log(`Logs fetched for container ${name}`);
-    res.status(200).send(logs.toString('utf8').trim() || 'No logs available');
-  } catch (error) {
-    console.error(`Error fetching logs for container ${name}:`, error.stack);
-    if (error.message === 'Container not found') {
-      res.status(404).json({ error: 'Container not found' });
-    } else {
-      res.status(500).json({ error: 'Failed to fetch logs', details: error.message });
-    }
-  }
-});
-
-// Get detailed information about all containers
-app.get('/api/containers', async (req, res) => {
-  const { inferenceServerType, remoteInferenceUrl } = req.query;
-  console.log(`Fetching all containers with type: ${inferenceServerType}, url: ${remoteInferenceUrl || 'N/A'}`);
-
-  try {
-    const dockerInstance = inferenceServerType
-      ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
-      : localDocker;
-
-    const containers = await dockerInstance.listContainers({ all: true });
-    const detailedContainers = await Promise.all(
-      containers.map(async (containerInfo) => {
-        const container = dockerInstance.getContainer(containerInfo.Id);
-        const details = await container.inspect();
-        return {
-          id: details.Id,
-          name: details.Name.replace(/^\//, ''),
-          status: details.State.Status,
-        };
-      })
-    );
-    console.log('Containers fetched:', detailedContainers);
-    res.json(detailedContainers);
-  } catch (error) {
-    console.error('Error fetching containers:', error.stack);
-    res.status(500).json({ error: 'Failed to fetch containers', details: error.message });
-  }
-});
-
-// Start a container and stop the other if running
-app.post('/api/containers/:name/start-exclusive', async (req, res) => {
-  const { name } = req.params;
-  const { inferenceServerType, remoteInferenceUrl } = req.body;
-  const otherContainerName = name === 'wago-hailo-webcam' ? 'wago-hailo-rtsp' : 'wago-hailo-webcam';
-  console.log(`Starting container exclusively: ${name}, stopping: ${otherContainerName}`);
-
-  try {
-    const dockerInstance = isInferenceContainer(name)
-      ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
-      : localDocker;
-
-    const otherContainer = dockerInstance.getContainer(otherContainerName);
-    const otherStatus = await otherContainer.inspect().catch(() => ({ State: { Running: false } }));
-    if (otherStatus.State.Running) {
-      await otherContainer.stop();
-      console.log(`${otherContainerName} stopped`);
-    }
-
-    const container = dockerInstance.getContainer(name);
-    await container.start();
-    console.log(`${name} started exclusively`);
-    res.status(200).json({ message: `${name} started` });
-  } catch (error) {
-    console.error(`Error in start-exclusive for ${name}:`, error.stack);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Fetch inference containers
-app.get('/api/inference-containers', async (req, res) => {
-  const { inferenceServerType, remoteInferenceUrl } = req.query;
-  console.log(`Fetching inference containers with type: ${inferenceServerType}, url: ${remoteInferenceUrl || 'N/A'}`);
-
-  try {
-    const dockerInstance = inferenceServerType === 'remote'
-      ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
-      : localDocker;
-
-    const containers = await dockerInstance.listContainers({ all: true });
-    const inferenceContainers = containers.filter(container =>
-      container.Names.some(name => /wago-hailo/.test(name))
-    ).map(container => ({
-      id: container.Id,
-      name: container.Names[0].replace(/^\//, ''),
-      status: container.State,
-    }));
-    console.log('Inference containers fetched:', inferenceContainers);
-    res.json(inferenceContainers);
-  } catch (error) {
-    console.error('Error fetching inference containers:', error.stack);
-    res.status(500).json({ error: 'Failed to fetch inference containers', details: error.message });
-  }
-});
-
-// Start a container dynamically based on source
-app.post('/api/containers/start', async (req, res) => {
-  const { inferenceServerType, remoteInferenceUrl, source } = req.body;
-  const pattern = source === 'webcam' ? /wago-hailo.*webcam/ : /wago-hailo.*rtsp/;
-  console.log(`Starting container for source: ${source}, pattern: ${pattern}`);
-
-  try {
-    const dockerInstance = inferenceServerType === 'remote'
-      ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
-      : localDocker;
-
-    const containers = await dockerInstance.listContainers({ all: true });
-    console.log('Available containers:', containers.map(c => ({ name: c.Names[0], state: c.State })));
-    const matchingContainer = containers.find(container =>
-      container.Names.some(name => pattern.test(name))
-    );
-
-    if (!matchingContainer) {
-      console.log(`No container found for source: ${source}`);
-      return res.status(404).json({ error: `No container found for source: ${source}` });
-    }
-
-    const container = dockerInstance.getContainer(matchingContainer.Id);
-    const inspect = await container.inspect();
-    if (!inspect.State.Running) {
-      console.log(`Starting stopped container: ${matchingContainer.Names[0]}`);
-      await container.start();
-    } else {
-      console.log(`Container already running: ${matchingContainer.Names[0]}`);
-    }
-    res.status(200).json({ 
-      message: `Container for ${source} started`, 
-      containerId: matchingContainer.Id,
-      containerName: matchingContainer.Names[0].replace(/^\//, ''),
-    });
-  } catch (error) {
-    console.error(`Error starting container for ${source}:`, error.stack);
-    res.status(500).json({ error: 'Failed to start container', details: error.message });
-  }
-});
-
-// Stop a container dynamically based on source
-app.post('/api/containers/stop', async (req, res) => {
-  const { inferenceServerType, remoteInferenceUrl, source } = req.body;
-  const pattern = source === 'webcam' ? /wago-hailo.*webcam/ : /wago-hailo.*rtsp/;
-  console.log(`Stopping container for source: ${source}, pattern: ${pattern}`);
-
-  try {
-    const dockerInstance = inferenceServerType === 'remote'
-      ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
-      : localDocker;
-
-    const containers = await dockerInstance.listContainers({ all: true });
-    console.log('Available containers:', containers.map(c => ({ name: c.Names[0], state: c.State })));
-    const matchingContainer = containers.find(container =>
-      container.Names.some(name => pattern.test(name))
-    );
-
-    if (!matchingContainer) {
-      console.log(`No container found for source: ${source}`);
-      return res.status(404).json({ error: `No container found for source: ${source}` });
-    }
-
-    const container = dockerInstance.getContainer(matchingContainer.Id);
-    const inspect = await container.inspect();
-    if (inspect.State.Running) {
-      console.log(`Stopping running container: ${matchingContainer.Names[0]}`);
-      await container.stop();
-    } else {
-      console.log(`Container already stopped: ${matchingContainer.Names[0]}`);
-    }
-    res.status(200).json({ 
-      message: `Container for ${source} stopped`, 
-      containerId: matchingContainer.Id,
-      containerName: matchingContainer.Names[0].replace(/^\//, ''),
-    });
-  } catch (error) {
-    console.error(`Error stopping container for ${source}:`, error.stack);
-    res.status(500).json({ error: 'Failed to stop container', details: error.message });
-  }
-});
-
-// Get container status dynamically
-app.get('/api/containers/status', async (req, res) => {
-  const { inferenceServerType, remoteInferenceUrl, source } = req.query;
-  const pattern = source === 'webcam' ? /wago-hailo.*webcam/ : /wago-hailo.*rtsp/;
-  console.log(`Fetching status for source: ${source}, pattern: ${pattern}`);
-
-  try {
-    const dockerInstance = inferenceServerType === 'remote'
-      ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
-      : localDocker;
-
-    const containers = await dockerInstance.listContainers({ all: true });
-    console.log('Available containers:', containers.map(c => ({ name: c.Names[0], state: c.State })));
-    const matchingContainer = containers.find(container =>
-      container.Names.some(name => pattern.test(name))
-    );
-
-    if (!matchingContainer) {
-      console.log(`No container found for source: ${source}`);
-      return res.status(404).json({ error: `No container found for source: ${source}` });
-    }
-
-    const container = dockerInstance.getContainer(matchingContainer.Id);
-    const data = await container.inspect();
-    console.log(`Container status for ${matchingContainer.Names[0]}: ${data.State.Status}`);
-    res.status(200).json({
-      running: data.State.Running,
-      status: data.State.Status,
-      containerId: matchingContainer.Id,
-      containerName: matchingContainer.Names[0].replace(/^\//, ''),
-    });
-  } catch (error) {
-    console.error(`Error fetching status for source ${source}:`, error.stack);
-    res.status(500).json({ error: 'Failed to fetch container status', details: error.message });
-  }
-});
-
-// Get container logs dynamically
-app.get('/api/containers/logs', async (req, res) => {
-  const { inferenceServerType, remoteInferenceUrl, source, lines = 200, since } = req.query;
-  const pattern = source === 'webcam' ? /wago-hailo.*webcam/ : /wago-hailo.*rtsp/;
-  console.log(`Fetching logs for source: ${source}, lines: ${lines}, since: ${since || 'N/A'}`);
-
-  try {
-    const dockerInstance = inferenceServerType === 'remote'
-      ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
-      : localDocker;
-
-    const containers = await dockerInstance.listContainers({ all: true });
-    console.log('Available containers:', containers.map(c => ({ name: c.Names[0], state: c.State })));
-    const matchingContainer = containers.find(container =>
-      container.Names.some(name => pattern.test(name))
-    );
-
-    if (!matchingContainer) {
-      console.log(`No container found for source: ${source}`);
-      return res.status(404).json({ error: `No container found for source: ${source}` });
-    }
-
-    const container = dockerInstance.getContainer(matchingContainer.Id);
-    const logs = await container.logs({
-      stdout: true,
-      stderr: true,
-      tail: parseInt(lines),
+      timestamps: true,
       since: since ? parseInt(since) : 0,
+      tail: lines || '142',
     });
-    console.log(`Logs fetched for ${matchingContainer.Names[0]}`);
-    res.status(200).send(logs.toString('utf8').trim() || 'No logs available');
-  } catch (error) {
-    console.error(`Error fetching logs for source ${source}:`, error.stack);
-    res.status(500).json({ error: 'Failed to fetch logs', details: error.message });
-  }
-});
 
-// Certificate upload endpoint
-app.post('/api/upload-certificates', upload.fields([
-  { name: 'ca', maxCount: 1 },
-  { name: 'cert', maxCount: 1 },
-  { name: 'key', maxCount: 1 },
-]), async (req, res) => {
-  const { ca, cert, key } = req.files;
-  console.log('Uploading certificates...');
-  try {
-    if (!ca || !cert || !key) {
-      console.log('Missing certificate files');
-      return res.status(400).json({ error: 'All certificate files (ca, cert, key) are required' });
-    }
-    await fs.writeFile('/etc/docker/certs/ca.pem', ca[0].buffer);
-    await fs.writeFile('/etc/docker/certs/client-cert.pem', cert[0].buffer);
-    await fs.writeFile('/etc/docker/certs/client-key.pem', key[0].buffer);
-    console.log('Certificates uploaded successfully');
-    res.status(200).json({ message: 'Certificates uploaded successfully' });
-  } catch (error) {
-    console.error('Error uploading certificates:', error.stack);
-    res.status(500).json({ error: 'Failed to upload certificates', details: error.message });
-  }
-});
-// Helper function to select the best Jupyter container
-const selectBestJupyterContainer = (containers) => {
-  // Sort containers by priority:
-  // 1. Running containers first
-  // 2. Recently created containers
-  // 3. Containers with "wago" in the name (likely our managed ones)
-  
-  const sorted = containers.sort((a, b) => {
-    // First priority: running state
-    const aRunning = a.State === 'running' ? 1 : 0;
-    const bRunning = b.State === 'running' ? 1 : 0;
-    if (aRunning !== bRunning) return bRunning - aRunning;
-    
-    // Second priority: has "wago" in name
-    const aWago = a.Names.some(n => n.toLowerCase().includes('wago')) ? 1 : 0;
-    const bWago = b.Names.some(n => n.toLowerCase().includes('wago')) ? 1 : 0;
-    if (aWago !== bWago) return bWago - aWago;
-    
-    // Third priority: creation time (newer first)
-    return b.Created - a.Created;
-  });
-  
-  return sorted[0];
-};
-
-// Get Jupyter container name with smart selection
-app.get('/api/jupyter/container-name', async (req, res) => {
-  console.log('[Jupyter] Fetching container name...');
-  
-  try {
-    const containers = await localDocker.listContainers({ all: true });
-    
-    // Look for any container with 'jupyter' in the name (case-insensitive)
-    const matchingContainers = containers.filter((container) =>
-      container.Names.some((name) => name.toLowerCase().includes('jupyter'))
-    );
-    
-    if (matchingContainers.length === 0) {
-      console.log('[Jupyter] No Jupyter container found');
-      return res.status(404).json({ 
-        error: 'No Jupyter container found',
-        hint: 'Please ensure a Jupyter container is installed'
-      });
-    }
-    
-    // Analyze the containers
-    const containerStats = {
-      total: matchingContainers.length,
-      running: matchingContainers.filter(c => c.State === 'running').length,
-      stopped: matchingContainers.filter(c => c.State === 'exited').length,
-      other: matchingContainers.filter(c => c.State !== 'running' && c.State !== 'exited').length
-    };
-    
-    console.log('[Jupyter] Container statistics:', containerStats);
-    
-    // Select the best container
-    const selectedContainer = selectBestJupyterContainer(matchingContainers);
-    const containerName = selectedContainer.Names[0].replace(/^\//, '');
-    
-    console.log(`[Jupyter] Selected container: ${containerName} (state: ${selectedContainer.State})`);
-    
-    // Prepare response with additional info
-    const response = {
-      containerName,
-      containerState: selectedContainer.State,
-      containerStats
-    };
-    
-    // Add hint if multiple containers found
-    if (matchingContainers.length > 1) {
-      response.hint = `Found ${containerStats.total} Jupyter containers: ${containerStats.running} running, ${containerStats.stopped} stopped${containerStats.other > 0 ? `, ${containerStats.other} other` : ''}. Using ${containerName}.`;
-      console.log('[Jupyter] Multiple containers hint:', response.hint);
-    }
-    
-    res.status(200).json(response);
-  } catch (error) {
-    console.error('[Jupyter] Error fetching container name:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch Jupyter container name',
-      details: error.message
-    });
-  }
-});
-
-// Toggle Jupyter container state with smart selection
-app.post('/api/jupyter/config', async (req, res) => {
-  const { enabled } = req.body;
-  console.log(`[Jupyter] Config update requested: enabled=${enabled}`);
-  
-  try {
-    const containers = await localDocker.listContainers({ all: true });
-    const matchingContainers = containers.filter((container) =>
-      container.Names.some((name) => name.toLowerCase().includes('jupyter'))
-    );
-    
-    if (matchingContainers.length === 0) {
-      console.error('[Jupyter] No Jupyter container found');
-      return res.status(404).json({ 
-        error: 'No Jupyter container found',
-        hint: 'Please ensure a Jupyter container is installed'
-      });
-    }
-    
-    // Select the best container
-    const selectedContainer = selectBestJupyterContainer(matchingContainers);
-    const containerName = selectedContainer.Names[0].replace(/^\//, '');
-    const containerId = selectedContainer.Id;
-    
-    console.log(`[Jupyter] Selected container for operation: ${containerName} (${containerId})`);
-    
-    // If enabling and there's already a running container that's not the selected one, stop it
-    if (enabled) {
-      const runningContainers = matchingContainers.filter(c => c.State === 'running' && c.Id !== containerId);
-      if (runningContainers.length > 0) {
-        console.log(`[Jupyter] Stopping ${runningContainers.length} other running Jupyter container(s)`);
-        for (const running of runningContainers) {
-          try {
-            const container = localDocker.getContainer(running.Id);
-            await container.stop();
-            console.log(`[Jupyter] Stopped container: ${running.Names[0]}`);
-          } catch (err) {
-            console.warn(`[Jupyter] Failed to stop container ${running.Names[0]}:`, err.message);
-          }
-        }
-      }
-    }
-    
-    const container = localDocker.getContainer(containerId);
-
-    try {
-      const inspection = await container.inspect();
-      const isRunning = inspection.State.Running;
-      
-      console.log(`[Jupyter] Container is currently ${isRunning ? 'running' : 'stopped'}`);
-      
-      let message = '';
-      if (enabled && !isRunning) {
-        console.log('[Jupyter] Starting container...');
-        await container.start();
-        message = `Started Jupyter container: ${containerName}`;
-        console.log('[Jupyter] Container started successfully');
-      } else if (!enabled && isRunning) {
-        console.log('[Jupyter] Stopping container...');
-        await container.stop();
-        message = `Stopped Jupyter container: ${containerName}`;
-        console.log('[Jupyter] Container stopped successfully');
-      } else {
-        message = `Jupyter container ${containerName} already ${enabled ? 'running' : 'stopped'}`;
-        console.log(`[Jupyter] Container already in desired state`);
-      }
-      
-      // Prepare response
-      const response = {
-        message,
-        containerName,
-        enabled
-      };
-      
-      // Add container stats if multiple found
-      if (matchingContainers.length > 1) {
-        const containerStats = {
-          total: matchingContainers.length,
-          managed: containerName
-        };
-        response.containerStats = containerStats;
-        response.hint = `Managing ${containerName} out of ${containerStats.total} Jupyter containers found`;
-      }
-      
-      res.status(200).json(response);
-    } catch (dockerError) {
-      console.error('[Jupyter] Docker operation error:', dockerError);
-      
-      if (dockerError.statusCode === 304) {
-        return res.status(200).json({ 
-          message: `Jupyter container ${containerName} already ${enabled ? 'running' : 'stopped'}`,
-          containerName,
-          enabled 
-        });
-      }
-      
-      throw dockerError;
-    }
-  } catch (error) {
-    console.error('[Jupyter] Error updating config:', error);
-    res.status(500).json({ 
-      error: 'Failed to update Jupyter config',
-      details: error.message
-    });
-  }
-});
-// Helper function to select the best Label Studio container
-const selectBestLabelStudioContainer = (containers) => {
-  // Sort containers by priority:
-  // 1. Running containers first
-  // 2. Containers with "wago" in the name
-  // 3. Recently created containers
-  
-  const sorted = containers.sort((a, b) => {
-    // First priority: running state
-    const aRunning = a.State === 'running' ? 1 : 0;
-    const bRunning = b.State === 'running' ? 1 : 0;
-    if (aRunning !== bRunning) return bRunning - aRunning;
-    
-    // Second priority: has "wago" in name
-    const aWago = a.Names.some(n => n.toLowerCase().includes('wago')) ? 1 : 0;
-    const bWago = b.Names.some(n => n.toLowerCase().includes('wago')) ? 1 : 0;
-    if (aWago !== bWago) return bWago - aWago;
-    
-    // Third priority: creation time (newer first)
-    return b.Created - a.Created;
-  });
-  
-  return sorted[0];
-};
-
-// Get Label Studio container name with smart selection
-app.get('/api/labelstudio/container-name', async (req, res) => {
-  console.log('[LabelStudio] Fetching container name...');
-  
-  try {
-    const containers = await localDocker.listContainers({ all: true });
-    const labelStudioContainers = containers.filter((container) =>
-      container.Names.some((name) => name.toLowerCase().includes('label-studio') || name.toLowerCase().includes('labelstudio'))
-    );
-    
-    if (labelStudioContainers.length === 0) {
-      console.log('[LabelStudio] No Label Studio container found');
-      return res.status(404).json({ 
-        error: 'No Label Studio container found',
-        hint: 'Please ensure Label Studio container is installed'
-      });
-    }
-    
-    // Analyze the containers
-    const containerStats = {
-      total: labelStudioContainers.length,
-      running: labelStudioContainers.filter(c => c.State === 'running').length,
-      stopped: labelStudioContainers.filter(c => c.State === 'exited').length,
-      other: labelStudioContainers.filter(c => c.State !== 'running' && c.State !== 'exited').length
-    };
-    
-    console.log('[LabelStudio] Container statistics:', containerStats);
-    
-    // Select the best container
-    const selectedContainer = selectBestLabelStudioContainer(labelStudioContainers);
-    const containerName = selectedContainer.Names[0].replace(/^\//, '');
-    
-    console.log(`[LabelStudio] Selected container: ${containerName} (state: ${selectedContainer.State})`);
-    
-    // Prepare response
-    const response = {
-      containerName,
-      containerState: selectedContainer.State,
-      containerStats
-    };
-    
-    // Add hint if multiple containers found
-    if (labelStudioContainers.length > 1) {
-      response.hint = `Found ${containerStats.total} Label Studio containers: ${containerStats.running} running, ${containerStats.stopped} stopped${containerStats.other > 0 ? `, ${containerStats.other} other` : ''}. Using ${containerName}.`;
-      console.log('[LabelStudio] Multiple containers hint:', response.hint);
-    }
-    
-    res.status(200).json(response);
-  } catch (error) {
-    console.error('[LabelStudio] Error fetching container name:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch Label Studio container name',
-      details: error.message
-    });
-  }
-});
-
-// Update Label Studio configuration with smart selection
-app.post('/api/labelstudio/config', async (req, res) => {
-  const { enabled } = req.body;
-  console.log(`[LabelStudio] Config update requested: enabled=${enabled}`);
-  
-  try {
-    const containers = await localDocker.listContainers({ all: true });
-    const labelStudioContainers = containers.filter((container) =>
-      container.Names.some((name) => name.toLowerCase().includes('label-studio') || name.toLowerCase().includes('labelstudio'))
-    );
-    
-    if (labelStudioContainers.length === 0) {
-      console.error('[LabelStudio] No Label Studio container found');
-      return res.status(404).json({ 
-        error: 'No Label Studio container found',
-        hint: 'Please ensure Label Studio container is installed'
-      });
-    }
-    
-    // Select the best container
-    const selectedContainer = selectBestLabelStudioContainer(labelStudioContainers);
-    const containerName = selectedContainer.Names[0].replace(/^\//, '');
-    const containerId = selectedContainer.Id;
-    
-    console.log(`[LabelStudio] Selected container for operation: ${containerName} (${containerId})`);
-    
-    // If enabling and there's already a running container that's not the selected one, stop it
-    if (enabled) {
-      const runningContainers = labelStudioContainers.filter(c => c.State === 'running' && c.Id !== containerId);
-      if (runningContainers.length > 0) {
-        console.log(`[LabelStudio] Stopping ${runningContainers.length} other running Label Studio container(s)`);
-        for (const running of runningContainers) {
-          try {
-            const container = localDocker.getContainer(running.Id);
-            await container.stop();
-            console.log(`[LabelStudio] Stopped container: ${running.Names[0]}`);
-          } catch (err) {
-            console.warn(`[LabelStudio] Failed to stop container ${running.Names[0]}:`, err.message);
-          }
-        }
-      }
-    }
-    
-    const container = localDocker.getContainer(containerId);
-
-    try {
-      const inspection = await container.inspect();
-      const isRunning = inspection.State.Running;
-      
-      let message = '';
-      if (enabled && !isRunning) {
-        await container.start();
-        message = `Started Label Studio container: ${containerName}`;
-      } else if (!enabled && isRunning) {
-        await container.stop();
-        message = `Stopped Label Studio container: ${containerName}`;
-      } else {
-        message = `Label Studio container ${containerName} already ${enabled ? 'running' : 'stopped'}`;
-      }
-      
-      // Prepare response
-      const response = {
-        message,
-        containerName,
-        enabled
-      };
-      
-      // Add container stats if multiple found
-      if (labelStudioContainers.length > 1) {
-        response.containerStats = {
-          total: labelStudioContainers.length,
-          managed: containerName
-        };
-        response.hint = `Managing ${containerName} out of ${labelStudioContainers.length} Label Studio containers found`;
-      }
-      
-      res.status(200).json(response);
-    } catch (dockerError) {
-      if (dockerError.statusCode === 304) {
-        return res.status(200).json({ 
-          message: `Label Studio container ${containerName} already ${enabled ? 'running' : 'stopped'}`,
-          containerName,
-          enabled 
-        });
-      }
-      throw dockerError;
-    }
-  } catch (error) {
-    console.error('[LabelStudio] Error updating config:', error);
-    res.status(500).json({ 
-      error: 'Failed to update Label Studio config',
-      details: error.message
-    });
-  }
-});
-// Get Grafana container name
-app.get('/api/grafana/container-name', async (req, res) => {
-  const containerSuffix = 'oGenericAnalytics_grafana';
-  try {
-    const containers = await localDocker.listContainers({ all: true });
-    const matchingContainers = containers.filter((container) =>
-      container.Names.some((name) => name.endsWith(containerSuffix))
-    );
-    if (matchingContainers.length === 0) {
-      return res.status(404).json({ error: 'No Grafana container found' });
-    }
-    if (matchingContainers.length > 1) {
-      return res.status(500).json({ error: 'Multiple Grafana containers found' });
-    }
-    const containerName = matchingContainers[0].Names[0].replace(/^\//, '');
-    res.status(200).json({ containerName });
-  } catch (error) {
-    console.error('Error fetching Grafana container name:', error);
-    res.status(500).json({ error: 'Failed to fetch Grafana container name' });
-  }
-});
-
-// Update Grafana configuration
-app.post('/api/grafana/config', async (req, res) => {
-  const { enabled } = req.body;
-  const configPath = '/etc/grafana/grafana.ini';
-  const containerSuffix = 'oGenericAnalytics_grafana';
-
-  try {
-    const containers = await localDocker.listContainers({ all: true });
-    const matchingContainers = containers.filter((container) =>
-      container.Names.some((name) => name.includes(containerSuffix))
-    );
-    if (matchingContainers.length !== 1) {
-      throw new Error(`Expected 1 Grafana container, found ${matchingContainers.length}`);
-    }
-    const containerInfo = matchingContainers[0];
-    const container = localDocker.getContainer(containerInfo.Id);
-    const data = await container.inspect();
-    if (!data.State.Running) {
-      await container.start();
-      console.log(`Started container ${containerInfo.Names[0]}`);
-    }
-    const configContent = enabled
-      ? `
-[auth.basic]
-enabled = true
-[security]
-allow_embedding = true
-[server]
-http_port = 3000
-root_url = https://%(domain)s/grafana/
-[users]
-default_theme = light
-[log]
-level = debug
-[live]
-enabled = true
-      `.trim()
-      : `
-[auth.basic]
-enabled = true
-[security]
-allow_embedding = false
-[server]
-http_port = 3000
-      `.trim();
-    const exec = await container.exec({
-      Cmd: ['sh', '-c', `echo "${configContent}" > ${configPath}`],
-      AttachStdout: true,
-      AttachStderr: true,
-    });
-    const stream = await exec.start({ Detach: false });
+    // Demux multiplexed Buffer (strip 8-byte headers, concat stdout/stderr)
     let output = '';
-    stream.on('data', (data) => (output += data.toString()));
-    await new Promise((resolve, reject) => {
-      stream.on('end', resolve);
-      stream.on('error', reject);
-    });
-    const execInfo = await exec.inspect();
-    if (execInfo.ExitCode !== 0) {
-      throw new Error(`Config update failed. Exit code: ${execInfo.ExitCode}. Output: ${output}`);
+    let offset = 0;
+    while (offset < logsBuffer.length) {
+      const header = logsBuffer.slice(offset, offset + 8);
+      const streamType = header.readUInt8(0); // 1=stdout, 2=stderr
+      const size = header.readUInt32BE(4);
+      const payload = logsBuffer.slice(offset + 8, offset + 8 + size).toString('utf8');
+      output += payload;
+      offset += 8 + size;
     }
-    await container.restart();
-    console.log(`Restarted container ${containerInfo.Names[0]}`);
-    res.status(200).json({ message: 'Grafana config updated' });
+
+    logger.info('Container logs fetched successfully', { name });
+    res.send(output);
   } catch (error) {
-    console.error('Error updating Grafana config:', error.message);
-    res.status(500).json({ error: `Failed to update Grafana config: ${error.message}` });
+    logger.error('Error fetching logs', { name, error: error.message, stack: error.stack });
+    let statusCode = 500;
+    let errDetails = error.message;
+    if (error.json && error.json.message) {
+      errDetails = error.json.message;
+      if (errDetails.includes('No such container')) statusCode = 404;
+    } else if (error.message.includes('No such container')) {
+      statusCode = 404;
+    }
+    res.status(statusCode).json({ error: 'Failed to fetch logs', details: errDetails });
   }
 });
 
-// Get Node-RED container name
-app.get('/api/nodered/container-name', async (req, res) => {
-  const containerSuffix = 'oGenericAnalytics_nodered';
+// Check remote Docker
+app.get('/api/check-remote-docker', async (req, res) => {
+  const { inferenceServerType, remoteInferenceUrl } = req.query;
+  logger.info('Checking remote Docker', { inferenceServerType, remoteInferenceUrl });
+  if (inferenceServerType !== 'remote' || !remoteInferenceUrl) {
+    logger.warn('Invalid remote check request', { inferenceServerType, remoteInferenceUrl });
+    return res.status(400).json({ status: 'unknown', error: 'Remote inference URL required' });
+  }
+  try {
+    const dockerInstance = getDockerInstance(inferenceServerType, remoteInferenceUrl);
+    await dockerInstance.ping();
+    logger.info(`Remote Docker at ${remoteInferenceUrl} is reachable`);
+    res.json({ status: 'reachable' });
+  } catch (error) {
+    logger.error('Error checking remote Docker host', { error: error.message, stack: error.stack });
+    res.status(500).json({ status: 'unreachable', error: error.message });
+  }
+});
+
+// Label Studio container name
+app.get('/api/labelstudio/container-name', async (req, res) => {
+  logger.info('Fetching Label Studio container name');
   try {
     const containers = await localDocker.listContainers({ all: true });
-    const matchingContainers = containers.filter((container) =>
-      container.Names.some((name) => name.includes(containerSuffix))
+    const labelStudioContainer = containers.find((container) =>
+      container.Names.some((name) => name.includes('label-studio'))
     );
-    if (matchingContainers.length === 0) {
-      return res.status(404).json({ error: 'No Node-RED container found' });
+    if (!labelStudioContainer) {
+      logger.warn('No Label Studio container found');
+      return res.status(404).json({ error: 'No Label Studio container found' });
     }
-    if (matchingContainers.length > 1) {
-      return res.status(500).json({ error: 'Multiple Node-RED containers found' });
-    }
-    const containerName = matchingContainers[0].Names[0].replace(/^\//, '');
+    const containerName = labelStudioContainer.Names[0].replace(/^\//, '');
+    logger.info('Label Studio container name fetched', { containerName });
     res.status(200).json({ containerName });
   } catch (error) {
-    console.error('Error fetching Node-RED container name:', error);
-    res.status(500).json({ error: 'Failed to fetch Node-RED container name' });
+    logger.error('Error fetching Label Studio container name', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to fetch Label Studio container name' });
   }
 });
 
-// Update Node-RED configuration (start/stop container)
-app.post('/api/nodered/config', async (req, res) => {
-  const { enabled } = req.body;
-  const containerSuffix = 'oGenericAnalytics_nodered';
+app.get('/api/jupyter/containers', async (req, res) => {
+  logger.info('Fetching Jupyter containers');
   try {
     const containers = await localDocker.listContainers({ all: true });
-    const matchingContainers = containers.filter((container) =>
-      container.Names.some((name) => name.includes(containerSuffix))
-    );
-    if (matchingContainers.length !== 1) {
-      throw new Error(`Expected 1 Node-RED container, found ${matchingContainers.length}`);
+    const jupyterContainers = containers
+      .filter((container) => container.Names.some((name) => name.toLowerCase().includes('jupyter')))
+      .map(container => ({
+        id: container.Id,
+        name: container.Names[0].replace(/^\//, '') || 'Unnamed',
+        status: container.State,
+      }));
+    if (jupyterContainers.length === 0) {
+      logger.warn('No Jupyter containers found');
+      return res.status(404).json({ error: 'No Jupyter containers found' });
     }
-    const containerName = matchingContainers[0].Names[0].replace(/^\//, '');
-    const container = localDocker.getContainer(containerName);
-
-    if (enabled) {
-      await container.start();
-    } else {
-      await container.stop();
-    }
-    res.status(200).json({ message: 'Node-RED config updated' });
+    logger.info('Jupyter containers fetched', { count: jupyterContainers.length });
+    res.status(200).json(jupyterContainers);
   } catch (error) {
-    console.error('Error updating Node-RED config:', error);
-    res.status(500).json({ error: 'Failed to update Node-RED config' });
+    logger.error('Error fetching Jupyter containers', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to fetch Jupyter containers' });
   }
 });
+
 
 app.get('/api/n8n/container-name', async (req, res) => {
+  logger.info('Fetching n8n container name');
   try {
     const containers = await localDocker.listContainers({ all: true });
     const n8nContainer = containers.find((container) =>
-      container.Names.some((name) => name === '/x-n8n')
+      container.Names.some((name) => name.includes('n8n'))
     );
     if (!n8nContainer) {
-      return res.status(404).json({ error: 'No primary n8n container found' });
+      logger.warn('No n8n container found');
+      return res.status(404).json({ error: 'No n8n container found' });
     }
     const containerName = n8nContainer.Names[0].replace(/^\//, '');
+    logger.info('n8n container name fetched', { containerName });
     res.status(200).json({ containerName });
   } catch (error) {
-    console.error('Error fetching n8n container name:', error);
+    logger.error('Error fetching n8n container name', { error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to fetch n8n container name' });
   }
 });
 
-app.post('/api/n8n/config', async (req, res) => {
-  const { enabled } = req.body;
+app.get('/api/n8n/containers', async (req, res) => {
+  logger.info('Fetching n8n containers');
   try {
     const containers = await localDocker.listContainers({ all: true });
-    const n8nContainer = containers.find((container) =>
-      container.Names.some((name) => name === '/x-n8n')
+    const n8nContainers = containers
+      .filter((container) => container.Names.some((name) => name.toLowerCase().includes('n8n')))
+      .map(container => ({
+        id: container.Id,
+        name: container.Names[0].replace(/^\//, '') || 'Unnamed',
+        status: container.State,
+      }));
+    if (n8nContainers.length === 0) {
+      logger.warn('No n8n containers found');
+      return res.status(404).json({ error: 'No n8n containers found' });
+    }
+    logger.info('n8n containers fetched', { count: n8nContainers.length });
+    res.status(200).json(n8nContainers);
+  } catch (error) {
+    logger.error('Error fetching n8n containers', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to fetch n8n containers' });
+  }
+});
+
+
+// Update Label Studio config
+app.post('/api/labelstudio/config', async (req, res) => {
+  const { enabled } = req.body;
+  logger.info('Updating Label Studio config', { enabled });
+  try {
+    const containers = await localDocker.listContainers({ all: true });
+    const labelStudioContainer = containers.find((container) =>
+      container.Names.some((name) => name.includes('label-studio'))
     );
-    if (!n8nContainer) {
-      throw new Error('Primary n8n container not found');
+    if (!labelStudioContainer) {
+      logger.warn('Label Studio container not found');
+      return res.status(404).json({ error: 'Label Studio container not found' });
     }
-    const containerName = n8nContainer.Names[0].replace(/^\//, '');
-    const container = localDocker.getContainer(containerName);
-
-    if (enabled) {
-      await container.start();
-    } else {
-      await container.stop();
+    const containerName = labelStudioContainer.Names[0].replace(/^\//, '');
+    logger.info(`Found Label Studio container: ${containerName}, current state: ${labelStudioContainer.State}`);
+    const container = localDocker.getContainer(labelStudioContainer.Id);
+    try {
+      if (enabled) {
+        const containerInfo = await container.inspect();
+        if (containerInfo.State.Running) {
+          logger.info('Label Studio container is already running', { containerName });
+          return res.status(200).json({ message: 'Label Studio is already running' });
+        }
+        logger.info('Starting Label Studio container', { containerName });
+        await container.start();
+        logger.info('Label Studio container started successfully', { containerName });
+      } else {
+        const containerInfo = await container.inspect();
+        if (!containerInfo.State.Running) {
+          logger.info('Label Studio container is already stopped', { containerName });
+          return res.status(200).json({ message: 'Label Studio is already stopped' });
+        }
+        logger.info('Stopping Label Studio container', { containerName });
+        await container.stop();
+        logger.info('Label Studio container stopped successfully', { containerName });
+      }
+      res.status(200).json({ message: 'Label Studio config updated' });
+    } catch (dockerError) {
+      logger.error('Docker operation error for Label Studio', { error: dockerError.message, stack: dockerError.stack });
+      if (dockerError.statusCode === 304) {
+        logger.info('Label Studio state unchanged', { containerName });
+        return res.status(200).json({ message: 'Label Studio state unchanged' });
+      }
+      throw dockerError;
     }
-    res.status(200).json({ message: 'n8n config updated' });
   } catch (error) {
-    console.error('Error updating n8n config:', error);
-    res.status(500).json({ error: 'Failed to update n8n config' });
+    logger.error('Error updating Label Studio config', { error: error.message, stack: error.stack });
+    res.status(500).json({
+      error: 'Failed to update Label Studio config',
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
-// Video stream endpoint with error handling
-app.get('/api/video/stream', (req, res) => {
-  const { source, rtspUrl } = req.query;
-  let ffmpegCmd;
-
-  console.log(`Starting video stream for source: ${source}, rtspUrl: ${rtspUrl || 'N/A'}`);
-
+// Upload certificates
+app.post('/api/upload-certificates', upload.fields([{ name: 'ca' }, { name: 'cert' }, { name: 'key' }]), async (req, res) => {
+  logger.info('Uploading certificates');
   try {
-    if (source === 'rtsp') {
-      if (!rtspUrl) {
-        console.log('RTSP URL missing');
-        return res.status(400).send('RTSP URL is required');
-      }
-      ffmpegCmd = spawn('ffmpeg', [
-        '-rtsp_transport', 'tcp',
-        '-i', rtspUrl,
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-tune', 'zerolatency',
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-f', 'mp4',
-        '-movflags', 'frag_keyframe+empty_moov',
-        '-reset_timestamps', '1',
-        'pipe:1'
-      ]);
-    } else if (source === 'webcam') {
-      res.writeHead(200, {
-        'Content-Type': 'multipart/x-mixed-replace; boundary=frame',
-      });
-      ffmpegCmd = spawn('ffmpeg', [
-        '-f', 'v4l2',              // Video4Linux2 input format
-        '-framerate', '30',        // 30 FPS
-        '-video_size', '640x640',  // Match FRAME_WIDTH and FRAME_HEIGHT
-        '-i', '/dev/video0',       // Webcam device (WEBCAM_INDEX: 0)
-        '-f', 'mjpeg',             // Output as MJPEG
-        'pipe:1',                  // Pipe output to stdout
-      ]);
-      ffmpegCmd.stdout.on('data', (data) => {
-        res.write('--frame\r\n');
-        res.write('Content-Type: image/jpeg\r\n');
-        res.write(`Content-Length: ${data.length}\r\n\r\n`);
-        res.write(data);
-      });
-    } else {
-      console.log('Invalid source specified');
-      return res.status(400).send('Invalid source');
-    }
-
-    ffmpegCmd.on('error', (err) => {
-      console.error('FFmpeg spawn error:', err);
-      if (!res.headersSent) {
-        res.status(500).send('Failed to start video stream: FFmpeg unavailable');
-      }
-    });
-
-    ffmpegCmd.stdout.pipe(res);
-
-    ffmpegCmd.stderr.on('data', (data) => {
-      console.error(`FFmpeg stderr: ${data}`);
-    });
-
-    ffmpegCmd.on('close', (code) => {
-      console.log(`FFmpeg process exited with code ${code}`);
-      if (!res.writableEnded) {
-        res.end();
-      }
-    });
+    await fs.writeFile('/etc/docker/certs/ca.pem', req.files.ca[0].buffer);
+    await fs.writeFile('/etc/docker/certs/client-cert.pem', req.files.cert[0].buffer);
+    await fs.writeFile('/etc/docker/certs/client-key.pem', req.files.key[0].buffer);
+    logger.info('Certificates uploaded successfully');
+    res.status(200).json({ message: 'Certificates uploaded' });
   } catch (error) {
-    console.error('Error in video stream:', error.stack);
-    if (!res.headersSent) {
-      res.status(500).send('Video streaming error');
-    }
+    logger.error('Error uploading certificates', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Upload failed' });
   }
 });
 
-// Get latest audio file
+// Remote metadata
+app.get('/api/remote/metadata', async (req, res) => {
+  debouncedInfo('Fetching remote metadata');
+  res.status(200).json({ metadata: {} });
+});
+
+// Remote inference data
+app.get('/api/remote/inference-data', async (req, res) => {
+  debouncedInfo('Fetching remote inference data');
+  res.status(200).json({ data: {} });
+});
+
+// Inference containers
+app.get('/api/inference-containers', async (req, res) => {
+  const { inferenceServerType, remoteInferenceUrl } = req.query;
+  debouncedInfo('Fetching inference containers', { inferenceServerType, remoteInferenceUrl });
+  try {
+    const dockerInstance = getDockerInstance(inferenceServerType, remoteInferenceUrl);
+    const containers = await dockerInstance.listContainers({ all: true });
+    const inferenceContainers = containers
+      .filter(container => isInferenceContainer(container.Names[0]?.replace(/^\//, '') || ''))
+      .map(container => ({
+        id: container.Id,
+        name: container.Names[0]?.replace(/^\//, '') || 'Unnamed',
+        status: container.State,
+        health: container.Status.includes('healthy') ? 'healthy' : container.Status.includes('unhealthy') ? 'unhealthy' : 'N/A',
+        image: container.Image,
+        created: container.Created,
+        isInference: true,
+      }));
+    logger.info('Inference containers fetched successfully', { count: inferenceContainers.length });
+    res.status(200).json(inferenceContainers);
+  } catch (error) {
+    logger.error('Error fetching inference containers', { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to fetch inference containers', details: error.message });
+  }
+});
+
+// Latest audio
 app.get('/api/latest-audio', async (req, res) => {
+  debouncedInfo('Fetching latest audio file');
   try {
-    const audioDir = '/app/audio';
-    console.log('Reading directory:', audioDir);
-    const files = await fs.readdir(audioDir);
-    console.log('Files found:', files);
-    const audioFiles = files.filter((file) => file.endsWith('.mp3'));
-    console.log('Filtered .mp3 files:', audioFiles);
+    const audioDir = '/app';
+    const audioFiles = await fs.readdir(audioDir);
     if (audioFiles.length === 0) {
-      console.log('No .mp3 files found');
+      debouncedWarn('No audio files found in directory', { audioDir });
       return res.status(404).json({ error: 'No audio files found' });
     }
     const latestFile = audioFiles.sort((a, b) => {
@@ -1139,125 +625,379 @@ app.get('/api/latest-audio', async (req, res) => {
       const timeB = b.match(/speech_(\d{8}_\d{6})/)?.[1] || '';
       return timeB.localeCompare(timeA);
     })[0];
-    console.log('Latest file:', latestFile);
     const url = `https://${req.headers.host}/audio/${latestFile}`;
-    console.log('Returning URL:', url);
+    debouncedInfo('Latest audio file fetched', { file: latestFile, url });
     res.json({ url });
   } catch (error) {
-    console.error('Error fetching latest audio:', error);
+    logger.error('Error fetching latest audio', { error: error.message, stack: error.stack });
     res.status(500).json({ error: 'Failed to fetch latest audio' });
   }
 });
 
-// Check remote Docker host accessibility
-app.get('/api/check-remote-docker', async (req, res) => {
+app.get('/api/inference/health', async (req, res) => {
   const { inferenceServerType, remoteInferenceUrl } = req.query;
-
-  if (inferenceServerType !== 'remote' || !remoteInferenceUrl) {
-    console.log('Invalid remote check request:', { inferenceServerType, remoteInferenceUrl });
-    return res.status(400).json({ status: 'unknown', error: 'Remote inference URL required' });
-  }
+  debouncedInfo('Checking inference health', { inferenceServerType, remoteInferenceUrl });
 
   try {
-    console.log(`Checking remote Docker at ${remoteInferenceUrl}`);
-    const dockerInstance = getDockerInstance(inferenceServerType, remoteInferenceUrl);
-    await dockerInstance.ping();
-    console.log(`Remote Docker at ${remoteInferenceUrl} is reachable`);
-    res.json({ status: 'reachable' });
-  } catch (error) {
-    console.error('Error checking remote Docker host:', error.stack);
-    res.status(500).json({ status: 'unreachable', error: error.message });
-  }
-});
+    let targetHost = 'localhost';
+    let targetPort = portInference;
 
-app.get('/api/labelstudio/container-name', async (req, res) => {
-  try {
-    const containers = await localDocker.listContainers({ all: true });
-    const labelStudioContainer = containers.find((container) =>
-      container.Names.some((name) => name.includes('label-studio'))
-    );
-    if (!labelStudioContainer) {
-      return res.status(404).json({ error: 'No Label Studio container found' });
-    }
-    const containerName = labelStudioContainer.Names[0].replace(/^\//, '');
-    res.status(200).json({ containerName });
-  } catch (error) {
-    console.error('Error fetching Label Studio container name:', error);
-    res.status(500).json({ error: 'Failed to fetch Label Studio container name' });
-  }
-});
-// Update Label Studio configuration (start/stop container)
-app.post('/api/labelstudio/config', async (req, res) => {
-  const { enabled } = req.body;
-  try {
-    const containers = await localDocker.listContainers({ all: true });
-    const labelStudioContainer = containers.find((container) =>
-      container.Names.some((name) => name.includes('label-studio'))
-    );
-    
-    if (!labelStudioContainer) {
-      console.error('Label Studio container not found');
-      return res.status(404).json({ error: 'Label Studio container not found' });
-    }
-    
-    const containerName = labelStudioContainer.Names[0].replace(/^\//, '');
-    console.log(`Found Label Studio container: ${containerName}, current state: ${labelStudioContainer.State}`);
-    
-    const container = localDocker.getContainer(labelStudioContainer.Id);
-
-    try {
-      if (enabled) {
-        // Check if container is already running
-        const containerInfo = await container.inspect();
-        if (containerInfo.State.Running) {
-          console.log('Label Studio container is already running');
-          return res.status(200).json({ message: 'Label Studio is already running' });
-        }
-        
-        console.log('Starting Label Studio container...');
-        await container.start();
-        console.log('Label Studio container started successfully');
-      } else {
-        // Check if container is already stopped
-        const containerInfo = await container.inspect();
-        if (!containerInfo.State.Running) {
-          console.log('Label Studio container is already stopped');
-          return res.status(200).json({ message: 'Label Studio is already stopped' });
-        }
-        
-        console.log('Stopping Label Studio container...');
-        await container.stop();
-        console.log('Label Studio container stopped successfully');
+    if (inferenceServerType === 'remote' && remoteInferenceUrl) {
+      try {
+        const urlString = remoteInferenceUrl.startsWith('http') ? remoteInferenceUrl : `https://${remoteInferenceUrl}`;
+        const url = new URL(urlString);
+        targetHost = url.hostname;
+        targetPort = url.port || portInference;
+      } catch (e) {
+        logger.error('Invalid remoteInferenceUrl format', { url: remoteInferenceUrl, error: e.message, stack: e.stack });
+        const [hostPart] = remoteInferenceUrl.split(':');
+        targetHost = hostPart || 'localhost';
       }
-      res.status(200).json({ message: 'Label Studio config updated' });
-    } catch (dockerError) {
-      console.error('Docker operation error:', dockerError);
-      
-      // Check if it's a "container already started/stopped" error
-      if (dockerError.statusCode === 304) {
-        return res.status(200).json({ message: 'Label Studio state unchanged' });
-      }
-      
-      throw dockerError;
     }
+
+    const healthUrl = `http://${targetHost}:${targetPort}/health`;
+    const response = await fetch(healthUrl, { timeout: 5000, headers: { 'Accept': 'application/json' } });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      logger.error(`Health check failed with status ${response.status}`, { url: healthUrl, body: errorText });
+      throw new Error(`Health check failed: ${response.status} - ${errorText}`);
+    }
+
+    const healthData = await response.json();
+    res.status(200).json({
+      status: 'healthy',
+      cameras: healthData.cameras || [{ id: 0, name: 'default' }],
+      inference_server: targetHost,
+      port: targetPort
+    });
   } catch (error) {
-    console.error('Error updating Label Studio config:', error);
-    res.status(500).json({ 
-      error: 'Failed to update Label Studio config', 
-      details: error.message,
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    logger.error('Inference health check failed', { error: error.message, stack: error.stack, url: healthUrl });
+    res.status(500).json({
+      status: 'unhealthy',
+      error: error.message,
+      cameras: [],
+      details: error.stack || 'No stack trace available'
     });
   }
 });
-// Load self-signed certificates for the server
-const options = {
-  key: fsp.readFileSync('/app/ssl/backend-selfsigned.key'),
-  cert: fsp.readFileSync('/app/ssl/backend-selfsigned.crt'),
-};
 
-// Start the server
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+app.get('/api/video/stream', (req, res) => {
+  const { source, rtspUrl, inferenceServerType, remoteInferenceUrl, camera_id } = req.query;
+  logger.info('Proxying HLS video stream', { source, rtspUrl, inferenceServerType, remoteInferenceUrl, camera_id });
+  if (!source) {
+    logger.warn('Source required for video stream');
+    return res.status(400).json({ error: 'Source required' });
+  }
+  let targetHost = 'localhost';
+  let targetPort = portInference;
+  let targetProtocol = 'http';
+  if (inferenceServerType === 'remote' && remoteInferenceUrl) {
+    let host;
+    try {
+      const urlString = remoteInferenceUrl.startsWith('http') ? remoteInferenceUrl : `http://${remoteInferenceUrl}`;
+      const url = new URL(urlString);
+      host = url.hostname;
+      targetHost = host;
+      targetPort = portInference;
+    } catch (e) {
+      logger.error('Invalid remoteInferenceUrl format', { url: remoteInferenceUrl, error: e.message, stack: e.stack });
+      const [hostPart] = remoteInferenceUrl.split(':');
+      targetHost = hostPart || 'localhost';
+      targetPort = portInference;
+    }
+  }
+  let targetPath = `/video/stream?source=${source}${rtspUrl ? `&rtspUrl=${encodeURIComponent(rtspUrl)}` : ''}${camera_id ? `&camera_id=${camera_id}` : ''}`;
+  const targetUrl = `${targetProtocol}://${targetHost}:${targetPort}${targetPath}`;
+  logger.info(`Proxying HLS stream to: ${targetUrl}`);
+  const proxy = createProxyMiddleware({
+    target: `${targetProtocol}://${targetHost}:${targetPort}`,
+    pathRewrite: {
+      '/api/video/stream': '/video/stream',
+    },
+    router: (req) => {
+      if (req.url.includes('.ts')) {
+        logger.info(`Target .ts: ${targetProtocol}://${targetHost}:${targetPort}`);
+        return `${targetProtocol}://${targetHost}:${targetPort}`;
+      }
+      logger.info(`Target: ${targetProtocol}://${targetHost}:${targetPort}`);
+      return `${targetProtocol}://${targetHost}:${targetPort}`;
+    },
+    changeOrigin: true,
+    selfHandleResponse: true,
+    timeout: 60000, // Increased timeout
+    proxyTimeout: 60000,
+    on: {
+      proxyRes: (proxyRes, req, res) => {
+        try {
+          if (proxyRes.statusCode !== 200) {
+            logger.warn('Non-200 response from target', {
+              status: proxyRes.statusCode,
+              targetUrl,
+              headers: proxyRes.headers,
+              timestamp: new Date().toISOString()
+            });
+            res.status(proxyRes.statusCode).json({
+              error: 'Stream error from target',
+              details: proxyRes.statusMessage || 'No details available',
+              hint: 'Check remote FastAPI logs (docker logs wago-hailo-yolov5m-helmet-webcam | grep error)',
+              timestamp: new Date().toISOString()
+            });
+            return;
+          }
+          let contentType = proxyRes.headers['content-type'] || (req.url.includes('.m3u8') ? 'application/vnd.apple.mpegurl' : 'video/MP2T');
+          res.writeHead(proxyRes.statusCode, {
+            'Content-Type': contentType,
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Access-Control-Allow-Origin': '*',
+            'Connection': 'keep-alive',
+          });
+          if (contentType === 'application/vnd.apple.mpegurl') {
+            let body = '';
+            proxyRes.on('data', (chunk) => { body += chunk.toString(); });
+            proxyRes.on('end', () => {
+              const lines = body.split('\n');
+              const newLines = lines.map((line) => {
+                if (line.match(/playlist\d+\.ts$/)) {
+                  const params = new URLSearchParams();
+                  for (const [key, value] of Object.entries(req.query)) {
+                    if (key !== 't') {
+                      params.set(key, value);
+                    }
+                  }
+                  logger.debug(`Rewriting .m3u8 line: ${line} to /api/remote/video/${line}`);
+                  return `/api/remote/video/${line}?${params.toString()}`;
+                }
+                return line;
+              });
+              logger.debug(`Serving rewritten .m3u8:\n${newLines.join('\n')}`);
+              res.end(newLines.join('\n'));
+            });
+          } else {
+            proxyRes.pipe(res, { end: true });
+          }
+        } catch (err) {
+          logger.error('Error handling proxy response for stream', {
+            error: err.message,
+            stack: err.stack,
+            targetUrl,
+            timestamp: new Date().toISOString()
+          });
+          res.status(500).json({
+            error: 'Internal proxy error',
+            details: err.message,
+            hint: 'Check backend logs for details',
+            timestamp: new Date().toISOString()
+          });
+        }
+      },
+      error: (err, req, res) => {
+        logger.error('Proxy error for HLS video stream', {
+          error: err.message,
+          code: err.code,
+          stack: err.stack,
+          targetUrl,
+          query: req.query,
+          headers: req.headers,
+          containerIp: require('os').networkInterfaces().eth0?.[0]?.address || 'unknown',
+          timestamp: new Date().toISOString()
+        });
+        let details = err.message;
+        let status = 502;
+        let hint = 'Verify FastAPI on 192.168.2.116:8042 (docker exec wago-ai-suite-backend curl http://192.168.2.116:8042/health). Check firewall on remote (firewall-cmd --list-rich-rules).';
+        if (err.code === 'ECONNREFUSED') {
+          details = `Connection refused to ${targetHost}:${targetPort} - Ensure FastAPI is running and port 8042 is open.`;
+        } else if (err.code === 'ETIMEDOUT') {
+          details = `Timeout connecting to ${targetHost}:${targetPort}. Check network latency or increase proxyTimeout.`;
+          status = 504;
+        } else if (err.code === 'ENOTFOUND') {
+          details = `Host ${targetHost} not found - Verify DNS (nslookup 192.168.2.116).`;
+        } else if (err.code === 'ECONNRESET') {
+          details = `Connection reset by ${targetHost}:${targetPort} - Check FastAPI logs (docker logs wago-hailo-yolov5m-helmet-webcam).`;
+        }
+        res.status(status).json({
+          error: 'HLS stream proxy failed',
+          details,
+          hint,
+          errorCode: err.code,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+  });
+  proxy(req, res);
 });
+app.get('/api/remote/video/:segment_name', (req, res) => {
+  const { segment_name } = req.params;
+  const { source, rtspUrl, inferenceServerType, remoteInferenceUrl, camera_id } = req.query;
+  if (!inferenceServerType || !camera_id) {
+    logger.warn('Missing required parameters for segment proxy', { query: req.query, timestamp: new Date().toISOString() });
+    return res.status(400).json({
+      error: 'Missing required query params (inferenceServerType, camera_id)',
+      hint: 'Ensure browser requests include all query params from .m3u8 modification',
+      timestamp: new Date().toISOString()
+    });
+  }
+  if (!segment_name || !segment_name.match(/playlist\d+\.ts$/)) {
+    logger.warn('Invalid segment name format', { segment_name, query: req.query, timestamp: new Date().toISOString() });
+    return res.status(400).json({
+      error: 'Invalid segment name; must be playlistN.ts',
+      hint: 'Check .m3u8 playlist for correct segment names (e.g., playlist7.ts)',
+      received: segment_name,
+      timestamp: new Date().toISOString()
+    });
+  }
+  let targetHost = 'localhost';
+  let targetPort = portInference || 8042;
+  let targetProtocol = 'http';
+  if (inferenceServerType === 'remote' && remoteInferenceUrl) {
+    let host;
+    try {
+      const urlString = remoteInferenceUrl.startsWith('http') ? remoteInferenceUrl : `http://${remoteInferenceUrl}`;
+      const url = new URL(urlString);
+      host = url.hostname;
+      targetHost = host;
+      targetPort = portInference || 8042;
+    } catch (e) {
+      logger.error('Invalid remoteInferenceUrl format in segment', {
+        url: remoteInferenceUrl,
+        error: e.message,
+        stack: e.stack,
+        timestamp: new Date().toISOString()
+      });
+      const [hostPart] = remoteInferenceUrl.split(':');
+      targetHost = hostPart || 'localhost';
+      targetPort = portInference || 8042;
+    }
+  }
+  let targetPath = `/video/${segment_name}`;
+  const targetUrl = `${targetProtocol}://${targetHost}:${targetPort}${targetPath}`;
+  logger.info(`Proxying HLS segment to: ${targetUrl}`, {
+    camera_id,
+    source,
+    segment_name,
+    query: req.query,
+    timestamp: new Date().toISOString()
+  });
+  const proxy = createProxyMiddleware({
+    target: `${targetProtocol}://${targetHost}:${targetPort}`,
+    changeOrigin: true,
+    timeout: 60000,
+    proxyTimeout: 60000,
+    on: {
+      proxyRes: (proxyRes, req, res) => {
+        try {
+          if (proxyRes.statusCode !== 200) {
+            logger.warn('Non-200 response for segment', {
+              status: proxyRes.statusCode,
+              targetUrl,
+              headers: proxyRes.headers,
+              timestamp: new Date().toISOString()
+            });
+            res.status(proxyRes.statusCode).json({
+              error: 'Segment error from target',
+              details: proxyRes.statusMessage || 'No details available',
+              hint: 'Check remote FFmpeg logs (docker logs wago-hailo-yolov5m-helmet-webcam | grep FFmpeg). If 404, verify /tmp/hls_0/${segment_name} exists.',
+              statusCode: proxyRes.statusCode,
+              timestamp: new Date().toISOString()
+            });
+            return;
+          }
+          res.writeHead(proxyRes.statusCode, {
+            'Content-Type': 'video/MP2T',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0',
+            'Access-Control-Allow-Origin': '*',
+            'Connection': 'keep-alive'
+          });
+          proxyRes.pipe(res, { end: true });
+        } catch (err) {
+          logger.error('Error handling proxy response for segment', {
+            error: err.message,
+            stack: err.stack,
+            targetUrl,
+            timestamp: new Date().toISOString()
+          });
+          res.status(500).json({
+            error: 'Internal proxy error for segment',
+            details: err.message,
+            hint: 'Check backend logs for traceback; ensure remote service stability',
+            stack: err.stack,
+            timestamp: new Date().toISOString()
+          });
+        }
+      },
+      error: (err, req, res) => {
+        logger.error('Proxy error for HLS segment', {
+          error: err.message,
+          code: err.code,
+          stack: err.stack,
+          targetUrl,
+          query: req.query,
+          headers: req.headers,
+          containerIp: require('os').networkInterfaces().eth0?.[0]?.address || 'unknown',
+          timestamp: new Date().toISOString()
+        });
+        let details = err.message;
+        let status = 502;
+        let hint = 'Verify FastAPI on 192.168.2.116:8042 (docker exec wago-ai-suite-backend curl http://192.168.2.116:8042/health). Check firewall on remote (firewall-cmd --list-rich-rules).';
+        if (err.code === 'ECONNREFUSED') {
+          details = `Connection refused to ${targetHost}:${targetPort} - Ensure FastAPI is running and port 8042 is open.`;
+        } else if (err.code === 'ETIMEDOUT') {
+          details = `Timeout connecting to ${targetHost}:${targetPort}. Check network latency or increase proxyTimeout.`;
+          status = 504;
+        } else if (err.code === 'ENOTFOUND') {
+          details = `Host ${targetHost} not found - Verify DNS (nslookup 192.168.2.116).`;
+        } else if (err.code === 'ECONNRESET') {
+          details = `Connection reset by ${targetHost}:${targetPort} - Check FastAPI logs (docker logs wago-hailo-yolov5m-helmet-webcam).`;
+        }
+        res.status(status).json({
+          error: 'HLS segment proxy failed',
+          details,
+          hint,
+          errorCode: err.code,
+          timestamp: new Date().toISOString()
+        });
+      }
+    }
+  });
+  try {
+    proxy(req, res);
+  } catch (proxyErr) {
+    logger.error('Unexpected proxy initialization error', {
+      error: proxyErr.message,
+      stack: proxyErr.stack,
+      targetUrl,
+      timestamp: new Date().toISOString()
+    });
+    res.status(500).json({
+      error: 'Unexpected proxy initialization error',
+      details: proxyErr.message,
+      hint: 'Check backend configuration and restart service',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+// Start HTTP server
+app.listen(port, () => {
+  logger.info(`HTTP server running on port ${port}`);
+});
+
+// Start HTTPS server (fallback if certs fail)
+try {
+  const options = {
+    key: fsp.readFileSync('/app/ssl/backend-selfsigned.key'),
+    cert: fsp.readFileSync('/app/ssl/backend-selfsigned.crt'),
+  };
+  https.createServer(options, app).listen(httpsPort, () => {
+    logger.info(`HTTPS server running on port ${httpsPort}`);
+  });
+} catch (error) {
+  logger.error('Failed to start HTTPS server due to certificate issues', { error: error.message, stack: error.stack });
+  logger.info('Continuing with HTTP server only');
+}
 
 module.exports = app;

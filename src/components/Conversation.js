@@ -1,11 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, memo } from 'react';
 import { useMqtt } from '../MqttContext';
 import { Box, Button, Typography, IconButton, LinearProgress } from '@mui/material';
 import MicIcon from '@mui/icons-material/Mic';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import PauseIcon from '@mui/icons-material/Pause';
 import StopIcon from '@mui/icons-material/Stop';
-import { makeStyles } from '@mui/styles';
+import { makeStyles, useTheme } from '@mui/styles';
+import throttle from 'lodash/throttle'; // Added for performance
+import DOMPurify from 'dompurify'; // Added for XSS safety
+import ErrorBoundary from './ErrorBoundary'; // New for robustness
 import {
   MQTT_VOICE_TOPIC,
   MQTT_TRANSCRIPTION_TOPIC,
@@ -14,14 +17,15 @@ import {
   MQTT_PROGRESS_TOPIC,
 } from '../config';
 
-const useStyles = makeStyles({
+const useStyles = makeStyles((theme) => ({
   pulseOrb: {
     animation: '$pulseOrb 3s ease-in-out infinite',
+    background: `radial-gradient(circle, ${theme.palette.primary.main} 0%, rgba(110,200,0,0.2) 70%)`, // WAGO green gradient
   },
   rippleEffect: {
     position: 'absolute',
     borderRadius: '50%',
-    background: 'radial-gradient(circle, rgba(0,168,150,0.4) 0%, rgba(0,168,150,0.2) 40%, rgba(0,168,150,0) 70%)',
+    background: `radial-gradient(circle, ${theme.palette.primary.main}0.4 0%, rgba(110,200,0,0.2) 40%, rgba(110,200,0,0) 70%)`, // Themed green
     animation: '$rippleOrb 2.5s infinite',
   },
   rotateGlow: {
@@ -31,31 +35,31 @@ const useStyles = makeStyles({
     animation: '$breathing 4s ease-in-out infinite',
   },
   '@keyframes pulseOrb': {
-    '0%': { 
+    '0%': {
       transform: 'scale(1)',
-      boxShadow: '0 0 30px rgba(0,168,150,0.6), 0 0 60px rgba(0,168,150,0.3)'
+      boxShadow: `0 0 30px ${theme.palette.primary.main}0.6, 0 0 60px ${theme.palette.primary.main}0.3`,
     },
-    '50%': { 
+    '50%': {
       transform: 'scale(1.08)',
-      boxShadow: '0 0 50px rgba(0,168,150,0.8), 0 0 100px rgba(0,168,150,0.4)'
+      boxShadow: `0 0 50px ${theme.palette.primary.main}0.8, 0 0 100px ${theme.palette.primary.main}0.4`,
     },
-    '100%': { 
+    '100%': {
       transform: 'scale(1)',
-      boxShadow: '0 0 30px rgba(0,168,150,0.6), 0 0 60px rgba(0,168,150,0.3)'
+      boxShadow: `0 0 30px ${theme.palette.primary.main}0.6, 0 0 60px ${theme.palette.primary.main}0.3`,
     },
   },
   '@keyframes rippleOrb': {
-    '0%': { 
-      transform: 'scale(0.8)', 
-      opacity: 0.8 
+    '0%': {
+      transform: 'scale(0.8)',
+      opacity: 0.8,
     },
-    '50%': { 
-      transform: 'scale(1.2)', 
-      opacity: 0.4 
+    '50%': {
+      transform: 'scale(1.2)',
+      opacity: 0.4,
     },
-    '100%': { 
-      transform: 'scale(1.8)', 
-      opacity: 0 
+    '100%': {
+      transform: 'scale(1.8)',
+      opacity: 0,
     },
   },
   '@keyframes rotateGlow': {
@@ -63,41 +67,42 @@ const useStyles = makeStyles({
     '100%': { transform: 'rotate(360deg)' },
   },
   '@keyframes breathing': {
-    '0%': { 
+    '0%': {
       transform: 'scale(1) rotate(0deg)',
-      filter: 'brightness(1) hue-rotate(0deg)'
+      filter: 'brightness(1) hue-rotate(0deg)',
     },
-    '25%': { 
+    '25%': {
       transform: 'scale(1.05) rotate(90deg)',
-      filter: 'brightness(1.1) hue-rotate(15deg)'
+      filter: 'brightness(1.1) hue-rotate(15deg)',
     },
-    '50%': { 
+    '50%': {
       transform: 'scale(1.1) rotate(180deg)',
-      filter: 'brightness(1.2) hue-rotate(30deg)'
+      filter: 'brightness(1.2) hue-rotate(30deg)',
     },
-    '75%': { 
+    '75%': {
       transform: 'scale(1.05) rotate(270deg)',
-      filter: 'brightness(1.1) hue-rotate(15deg)'
+      filter: 'brightness(1.1) hue-rotate(15deg)',
     },
-    '100%': { 
+    '100%': {
       transform: 'scale(1) rotate(360deg)',
-      filter: 'brightness(1) hue-rotate(0deg)'
+      filter: 'brightness(1) hue-rotate(0deg)',
     },
   },
-});
+}));
 
-const BeautifulOrb = ({ onClick, disabled, isActive, isIdle, interactionState }) => {
+const BeautifulOrb = memo(({ onClick, disabled, isActive, isIdle, interactionState }) => {
   const classes = useStyles();
-  
+  const theme = useTheme();
+
   const getOrbState = () => {
     if (interactionState === 'listening') return 'listening';
     if (interactionState === 'processing') return 'processing';
     if (interactionState === 'responding') return 'responding';
     return 'idle';
   };
-  
+
   const orbState = getOrbState();
-  
+
   return (
     <Box
       onClick={disabled ? undefined : onClick}
@@ -112,19 +117,19 @@ const BeautifulOrb = ({ onClick, disabled, isActive, isIdle, interactionState })
         cursor: disabled ? 'not-allowed' : 'pointer',
         transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
         borderRadius: '50%',
-        background: orbState === 'listening' 
-          ? 'radial-gradient(circle at 30% 30%, #FFD700, #FFA500, #FF6347, #00A896)'
+        background: orbState === 'listening'
+          ? `radial-gradient(circle at 30% 30%, ${theme.palette.primary.main}, #FFA500, #FF6347, ${theme.palette.secondary.main})`
           : orbState === 'processing'
-          ? 'radial-gradient(circle at 30% 30%, #40E0D0, #00CED1, #20B2AA, #008B8B)'
+          ? `radial-gradient(circle at 30% 30%, ${theme.palette.primary.main}, #00CED1, #20B2AA, ${theme.palette.secondary.main})`
           : orbState === 'responding'
-          ? 'radial-gradient(circle at 30% 30%, #98FB98, #90EE90, #32CD32, #228B22)'
-          : 'radial-gradient(circle at 30% 30%, #40E0D0, #00A896, #008B8B, #006666)',
-        boxShadow: isActive 
-          ? '0 0 60px rgba(0,168,150,0.8), 0 0 120px rgba(0,168,150,0.4), inset 0 0 60px rgba(255,255,255,0.1)'
-          : '0 0 40px rgba(0,168,150,0.6), 0 0 80px rgba(0,168,150,0.3), inset 0 0 40px rgba(255,255,255,0.1)',
+          ? `radial-gradient(circle at 30% 30%, ${theme.palette.primary.main}, #90EE90, #32CD32, ${theme.palette.secondary.main})`
+          : `radial-gradient(circle at 30% 30%, ${theme.palette.primary.main}, ${theme.palette.secondary.main}, #008B8B, #006666)`,
+        boxShadow: isActive
+          ? `0 0 60px ${theme.palette.primary.main}0.8, 0 0 120px ${theme.palette.primary.main}0.4, inset 0 0 60px rgba(255,255,255,0.1)`
+          : `0 0 40px ${theme.palette.primary.main}0.6, 0 0 80px ${theme.palette.primary.main}0.3, inset 0 0 40px rgba(255,255,255,0.1)`,
         '&:hover': {
           transform: disabled ? 'none' : 'scale(1.1)',
-          boxShadow: '0 0 80px rgba(0,168,150,0.9), 0 0 160px rgba(0,168,150,0.5), inset 0 0 80px rgba(255,255,255,0.2)',
+          boxShadow: `0 0 80px ${theme.palette.primary.main}0.9, 0 0 160px ${theme.palette.primary.main}0.5, inset 0 0 80px rgba(255,255,255,0.2)`,
         },
         '&:active': {
           transform: disabled ? 'none' : 'scale(0.95)',
@@ -140,7 +145,7 @@ const BeautifulOrb = ({ onClick, disabled, isActive, isIdle, interactionState })
           height: '100%',
           borderRadius: '50%',
           border: '2px solid transparent',
-          background: 'linear-gradient(45deg, transparent, rgba(255,255,255,0.3), transparent, rgba(0,168,150,0.3))',
+          background: `linear-gradient(45deg, transparent, rgba(255,255,255,0.3), transparent, ${theme.palette.primary.main}0.3)`,
           backgroundClip: 'border-box',
           '&::before': {
             content: '""',
@@ -151,10 +156,9 @@ const BeautifulOrb = ({ onClick, disabled, isActive, isIdle, interactionState })
             bottom: '2px',
             borderRadius: '50%',
             background: 'transparent',
-          }
+          },
         }}
       />
-      
       {/* Inner orb with glassmorphism effect */}
       <Box
         className={orbState === 'processing' ? classes.breathing : ''}
@@ -180,20 +184,19 @@ const BeautifulOrb = ({ onClick, disabled, isActive, isIdle, interactionState })
             borderRadius: '50%',
             background: 'radial-gradient(circle, rgba(255,255,255,0.6) 0%, rgba(255,255,255,0.2) 50%, transparent 70%)',
             filter: 'blur(2px)',
-          }
+          },
         }}
       >
-        <MicIcon 
-          sx={{ 
+        <MicIcon
+          sx={{
             fontSize: isActive ? '4rem' : '3.5rem',
             color: 'white',
             zIndex: 2,
             filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.3))',
             transition: 'all 0.3s ease',
-          }} 
+          }}
         />
       </Box>
-      
       {/* Floating particles */}
       {isActive && (
         <>
@@ -210,7 +213,7 @@ const BeautifulOrb = ({ onClick, disabled, isActive, isIdle, interactionState })
               '@keyframes float': {
                 '0%, 100%': { transform: 'translateY(0px)' },
                 '50%': { transform: 'translateY(-15px)' },
-              }
+              },
             }}
           />
           <Box
@@ -241,7 +244,7 @@ const BeautifulOrb = ({ onClick, disabled, isActive, isIdle, interactionState })
       )}
     </Box>
   );
-};
+});
 
 const Conversation = ({ webhookUrls }) => {
   const { client, connectionStatus, error } = useMqtt();
@@ -252,64 +255,75 @@ const Conversation = ({ webhookUrls }) => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [progressMessage, setProgressMessage] = useState('');
   const [progressValue, setProgressValue] = useState(0);
+  const [fetchError, setFetchError] = useState(null); // Added for error handling
   const audioRef = useRef(new Audio());
+  const theme = useTheme(); // Added for WAGO theme integration
   const classes = useStyles();
 
   const progressMap = {
-    'recording': 25,
-    'transcribing': 50,
+    recording: 25,
+    transcribing: 50,
     'generating audio': 75,
-    'complete': 100,
+    complete: 100,
   };
 
   useEffect(() => {
     if (!client || connectionStatus !== 'Connected') return;
 
-    const handleTranscription = (topic, message) => {
-      const msg = JSON.parse(message.toString());
-      setTranscription(msg.transcription);
-      setInteractionState('processing');
-    };
-
-    const handleVoice = (topic, message) => {
-      const msg = JSON.parse(message.toString());
-      const audioUrl = msg.audioUrl?.endsWith('.mp3') ? msg.audioUrl : null;
-      if (audioUrl) {
-        setAudioSrc(audioUrl);
-        setInteractionState('responding');
-        setShowPlayButton(true);
+    const handleMessage = throttle((topic, message) => {
+      const timestamp = new Date().toISOString();
+      let msg;
+      try {
+        msg = JSON.parse(message.toString());
+      } catch (e) {
+        console.error(`[MQTT ${timestamp}] Parse error on topic ${topic}: ${e.message}`);
+        return;
       }
-    };
+      console.debug(`[MQTT ${timestamp}] Topic: ${topic}, Payload:`, msg); // Structured log
 
-    const handleProgress = (topic, message) => {
-      const msg = JSON.parse(message.toString());
-      const progressText = msg.message?.toLowerCase() || 'Processing...';
-      setProgressMessage(progressText);
-      const value = progressMap[progressText] || 0;
-      setProgressValue(value);
-      if (value === 100) {
-        setTimeout(() => {
-          setInteractionState('idle');
-          setTranscription('');
-          setProgressMessage('');
-          setProgressValue(0);
-        }, 1000);
+      if (topic === MQTT_TRANSCRIPTION_TOPIC) {
+        setTranscription(DOMPurify.sanitize(msg.transcription)); // Sanitize for XSS
+        setInteractionState('processing');
+      } else if (topic === MQTT_VOICE_TOPIC) {
+        const audioUrl = msg.audioUrl?.endsWith('.mp3') ? msg.audioUrl : null;
+        if (audioUrl) {
+          setAudioSrc(audioUrl);
+          setInteractionState('responding');
+          setShowPlayButton(true);
+        }
+      } else if (topic === MQTT_PROGRESS_TOPIC) {
+        const progressText = msg.message?.toLowerCase() || 'Processing...';
+        setProgressMessage(progressText);
+        const value = progressMap[progressText] || 0;
+        setProgressValue(value);
+        if (value === 100) {
+          setTimeout(() => {
+            setInteractionState('idle');
+            setTranscription('');
+            setProgressMessage('');
+            setProgressValue(0);
+          }, 1000);
+        }
       }
-    };
+    }, 200); // Throttle for scalability
 
-    client.subscribe(MQTT_TRANSCRIPTION_TOPIC);
-    client.subscribe(MQTT_VOICE_TOPIC);
-    client.subscribe(MQTT_PROGRESS_TOPIC);
-    client.on('message', (topic, message) => {
-      if (topic === MQTT_TRANSCRIPTION_TOPIC) handleTranscription(topic, message);
-      if (topic === MQTT_VOICE_TOPIC) handleVoice(topic, message);
-      if (topic === MQTT_PROGRESS_TOPIC) handleProgress(topic, message);
+    client.subscribe(MQTT_TRANSCRIPTION_TOPIC, (err) => {
+      if (err) console.error(`[MQTT ${new Date().toISOString()}] Subscribe error for ${MQTT_TRANSCRIPTION_TOPIC}: ${err.message}`);
+    });
+    client.subscribe(MQTT_VOICE_TOPIC, (err) => {
+      if (err) console.error(`[MQTT ${new Date().toISOString()}] Subscribe error for ${MQTT_VOICE_TOPIC}: ${err.message}`);
+    });
+    client.subscribe(MQTT_PROGRESS_TOPIC, (err) => {
+      if (err) console.error(`[MQTT ${new Date().toISOString()}] Subscribe error for ${MQTT_PROGRESS_TOPIC}: ${err.message}`);
     });
 
+    client.on('message', handleMessage);
+
     return () => {
-      client.unsubscribe(MQTT_TRANSCRIPTION_TOPIC);
-      client.unsubscribe(MQTT_VOICE_TOPIC);
-      client.unsubscribe(MQTT_PROGRESS_TOPIC);
+      client.off('message', handleMessage);
+      client.unsubscribe([MQTT_TRANSCRIPTION_TOPIC, MQTT_VOICE_TOPIC, MQTT_PROGRESS_TOPIC], (err) => {
+        if (err) console.error(`[MQTT ${new Date().toISOString()}] Unsubscribe error: ${err.message}`);
+      });
     };
   }, [client, connectionStatus]);
 
@@ -321,6 +335,7 @@ const Conversation = ({ webhookUrls }) => {
         setTranscription('');
         setProgressMessage('');
         setProgressValue(0);
+        console.debug(`[State ${new Date().toISOString()}] Processing timed out, reset to idle`);
       }, 120000);
     }
     return () => clearTimeout(timeoutId);
@@ -328,35 +343,61 @@ const Conversation = ({ webhookUrls }) => {
 
   useEffect(() => {
     if (!audioSrc) return;
-
     const audio = audioRef.current;
     audio.src = audioSrc;
-
     audio.onended = () => {
       setIsPlaying(false);
       setInteractionState('idle');
       setShowPlayButton(false);
+      console.debug(`[Audio ${new Date().toISOString()}] Playback ended`);
     };
-
     return () => {
       audio.pause();
+      console.debug(`[Audio ${new Date().toISOString()}] Audio paused on cleanup`);
     };
   }, [audioSrc]);
 
+  const retryOperation = async (fn, retries = 3, operationName = 'Operation') => {
+    for (let i = 0; i < retries; i++) {
+      try {
+        await fn();
+        console.debug(`[${operationName} ${new Date().toISOString()}] Attempt ${i + 1} successful`);
+        return;
+      } catch (e) {
+        console.warn(`[${operationName} ${new Date().toISOString()}] Attempt ${i + 1}/${retries} failed: ${e.message}`);
+        if (i < retries - 1) await new Promise((r) => setTimeout(r, 1000 * (i + 1))); // Exponential backoff
+      }
+    }
+    throw new Error(`${operationName} failed after ${retries} retries`);
+  };
+
   const handleStartRecording = () => {
-    if (interactionState === 'idle' && client && connectionStatus === 'Connected') {
+    if (interactionState !== 'idle' || !client || connectionStatus !== 'Connected') {
+      console.debug(`[Recording ${new Date().toISOString()}] Skipped: state=${interactionState}, connection=${connectionStatus}`);
+      return;
+    }
+
+    const publishStart = async () => {
       client.publish(MQTT_START_TOPIC, START_PAYLOAD);
       setInteractionState('listening');
       setProgressValue(10);
       setProgressMessage('Starting...');
       setTimeout(() => {
-        if (interactionState === 'listening') setInteractionState('processing');
+        if (interactionState === 'listening') {
+          setInteractionState('processing');
+          console.debug(`[State ${new Date().toISOString()}] Transitioned to processing`);
+        }
       }, 10000);
-    }
+    };
+
+    retryOperation(publishStart, 3, 'StartRecording').catch((err) => {
+      setFetchError(err.message);
+      console.error(`[Recording ${new Date().toISOString()}] Failed: ${err.message}`);
+    });
   };
 
   const handlePlayLatestAudio = async () => {
-    try {
+    const fetchAudio = async () => {
       const response = await fetch('/api/latest-audio');
       if (!response.ok) throw new Error('Failed to fetch latest audio');
       const data = await response.json();
@@ -364,37 +405,57 @@ const Conversation = ({ webhookUrls }) => {
       setAudioSrc(data.url);
       setInteractionState('responding');
       setShowPlayButton(true);
-    } catch (error) {
-      console.error('Error fetching latest audio:', error);
-      setTranscription('Failed to load the latest audio file. Please try again.');
-    }
+    };
+
+    retryOperation(fetchAudio, 3, 'FetchLatestAudio').catch((err) => {
+      setFetchError('Failed to load the latest audio file. Please try again.');
+      console.error(`[AudioFetch ${new Date().toISOString()}] Failed: ${err.message}`);
+    });
   };
 
   const handlePlayAudio = () => {
-    audioRef.current.play().then(() => setIsPlaying(true)).catch((error) => console.error('Error playing audio:', error));
+    audioRef.current.play()
+      .then(() => {
+        setIsPlaying(true);
+        console.debug(`[Audio ${new Date().toISOString()}] Playing audio: ${audioSrc}`);
+      })
+      .catch((error) => {
+        console.error(`[Audio ${new Date().toISOString()}] Play error: ${error.message}`);
+        setFetchError('Error playing audio');
+      });
   };
 
   const handlePauseAudio = () => {
     audioRef.current.pause();
     setIsPlaying(false);
+    console.debug(`[Audio ${new Date().toISOString()}] Paused audio`);
   };
 
   const handleStopAudio = () => {
     audioRef.current.pause();
     audioRef.current.currentTime = 0;
     setIsPlaying(false);
+    console.debug(`[Audio ${new Date().toISOString()}] Stopped audio`);
   };
 
   const handleAbort = () => {
     if (client) {
-      client.publish('agent/audio/abort', JSON.stringify({ command: 'abort' }));
-      setInteractionState('idle');
-      setTranscription('');
-      setProgressMessage('');
-      setProgressValue(0);
-      setAudioSrc(null);
-      setShowPlayButton(false);
-      setIsPlaying(false);
+      const abortPublish = async () => {
+        client.publish('agent/audio/abort', JSON.stringify({ command: 'abort' }));
+        setInteractionState('idle');
+        setTranscription('');
+        setProgressMessage('');
+        setProgressValue(0);
+        setAudioSrc(null);
+        setShowPlayButton(false);
+        setIsPlaying(false);
+        console.debug(`[Abort ${new Date().toISOString()}] Aborted conversation`);
+      };
+
+      retryOperation(abortPublish, 3, 'Abort').catch((err) => {
+        setFetchError(err.message);
+        console.error(`[Abort ${new Date().toISOString()}] Failed: ${err.message}`);
+      });
     }
   };
 
@@ -410,245 +471,277 @@ const Conversation = ({ webhookUrls }) => {
 
   if (connectionStatus !== 'Connected') {
     return (
-      <Box sx={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
-        justifyContent: 'center', 
-        alignItems: 'center', 
-        height: '100vh', 
-        textAlign: 'center',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-      }}>
-        <Typography variant="h6" sx={{ color: 'white', mb: 2 }}>
-          MQTT {connectionStatus}
-        </Typography>
-        {error && <Typography color="error">{error}</Typography>}
-      </Box>
+      <ErrorBoundary>
+        <Box
+          sx={{
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'center',
+            alignItems: 'center',
+            height: '100vh',
+            textAlign: 'center',
+            background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`, // WAGO theme
+          }}
+        >
+          <Typography
+            variant="h6"
+            sx={{
+              color: 'white',
+              mb: 2,
+              textTransform: 'uppercase', // WAGO theme typography
+              fontWeight: 600,
+            }}
+          >
+            MQTT {connectionStatus}
+          </Typography>
+          {error && (
+            <Typography color="error" sx={{ textTransform: 'uppercase', fontWeight: 600 }}>
+              {error}
+            </Typography>
+          )}
+        </Box>
+      </ErrorBoundary>
     );
   }
 
   return (
-    <Box sx={{ 
-      display: 'flex', 
-      flexDirection: 'column', 
-      alignItems: 'center', 
-      minHeight: '100vh', 
-      justifyContent: 'center', 
-      textAlign: 'center', 
-      py: 4,
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      position: 'relative',
-      overflow: 'hidden',
-      '&::before': {
-        content: '""',
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%), radial-gradient(circle at 80% 20%, rgba(255, 119, 198, 0.3) 0%, transparent 50%)',
-        pointerEvents: 'none',
-      }
-    }}>
-      <Box sx={{ 
-        position: 'relative', 
-        width: '400px', 
-        height: '400px', 
-        display: 'flex', 
-        justifyContent: 'center', 
-        alignItems: 'center',
-        zIndex: 1,
-      }}>
-        {interactionState === 'idle' && (
-          <>
-            <Box className={classes.rippleEffect} sx={{ ...rippleStyles, animationDelay: '0s' }} />
-            <Box className={classes.rippleEffect} sx={{ ...rippleStyles, animationDelay: '0.6s' }} />
-            <Box className={classes.rippleEffect} sx={{ ...rippleStyles, animationDelay: '1.2s' }} />
-            <Box className={classes.rippleEffect} sx={{ ...rippleStyles, animationDelay: '1.8s' }} />
-          </>
-        )}
-        <BeautifulOrb
-          onClick={handleStartRecording}
-          disabled={interactionState !== 'idle'}
-          isActive={interactionState === 'listening' || interactionState === 'processing'}
-          isIdle={interactionState === 'idle'}
-          interactionState={interactionState}
-        />
-      </Box>
-
-      <Box sx={{ width: '300px', mt: 3, zIndex: 1 }}>
-        {['listening', 'processing'].includes(interactionState) && (
-          <>
-            <LinearProgress
-              variant={progressValue > 0 ? 'determinate' : 'indeterminate'}
-              value={progressValue}
-              sx={{ 
-                bgcolor: 'rgba(255, 255, 255, 0.2)',
-                borderRadius: '10px',
-                height: '8px',
-                '& .MuiLinearProgress-bar': { 
-                  bgcolor: 'linear-gradient(90deg, #40E0D0, #00A896)',
-                  borderRadius: '10px',
-                } 
-              }}
-            />
-            <Typography variant="body2" sx={{ 
-              mt: 2, 
-              color: 'rgba(255, 255, 255, 0.9)',
-              fontWeight: 500,
-              textShadow: '0 1px 3px rgba(0,0,0,0.3)',
-            }}>
-              {progressMessage || 'Processing...'}
-            </Typography>
-          </>
-        )}
-      </Box>
-
-      <Box sx={{ mt: 4, zIndex: 1 }}>
-        <Button
-          variant="contained"
-          onClick={handlePlayLatestAudio}
+    <ErrorBoundary>
+      <Box
+        sx={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          minHeight: '100vh',
+          justifyContent: 'center',
+          textAlign: 'center',
+          py: 4,
+          background: `linear-gradient(135deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`, // WAGO theme
+          position: 'relative',
+          overflow: 'hidden',
+          '&::before': {
+            content: '""',
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: `radial-gradient(circle at 20% 80%, ${theme.palette.primary.main}0.3 0%, transparent 50%), radial-gradient(circle at 80% 20%, ${theme.palette.secondary.main}0.3 0%, transparent 50%)`,
+            pointerEvents: 'none',
+          },
+        }}
+      >
+        <Box
           sx={{
-            mr: 2,
-            backgroundColor: 'rgba(0, 168, 150, 0.9)',
-            backdropFilter: 'blur(10px)',
-            border: '1px solid rgba(255, 255, 255, 0.2)',
-            borderRadius: '25px',
-            px: 3,
-            py: 1.5,
-            '&:hover': { 
-              backgroundColor: 'rgba(0, 147, 131, 0.9)',
-              transform: 'translateY(-2px)',
-              boxShadow: '0 8px 25px rgba(0, 168, 150, 0.3)',
-            },
-            color: '#ffffff',
-            fontWeight: 600,
-            textShadow: '0 1px 3px rgba(0,0,0,0.3)',
-            transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+            position: 'relative',
+            width: '400px',
+            height: '400px',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1,
           }}
         >
-          Play Latest Audio
-        </Button>
-        
-        {showPlayButton && (
-          <Box sx={{ display: 'inline-flex', gap: 1 }}>
-            <IconButton 
-              onClick={handlePlayAudio} 
-              disabled={isPlaying}
-              sx={{
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                color: 'white',
-                '&:hover': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                  transform: 'scale(1.1)',
-                },
-                '&:disabled': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                  color: 'rgba(255, 255, 255, 0.5)',
-                },
-                transition: 'all 0.3s ease',
-              }}
-            >
-              <PlayArrowIcon />
-            </IconButton>
-            
-            <IconButton 
-              onClick={handlePauseAudio} 
-              disabled={!isPlaying}
-              sx={{
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                color: 'white',
-                '&:hover': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                  transform: 'scale(1.1)',
-                },
-                '&:disabled': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.05)',
-                  color: 'rgba(255, 255, 255, 0.5)',
-                },
-                transition: 'all 0.3s ease',
-              }}
-            >
-              <PauseIcon />
-            </IconButton>
-            
-            <IconButton 
-              onClick={handleStopAudio}
-              sx={{
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                backdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.2)',
-                color: 'white',
-                '&:hover': {
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
-                  transform: 'scale(1.1)',
-                },
-                transition: 'all 0.3s ease',
-              }}
-            >
-              <StopIcon />
-            </IconButton>
-          </Box>
-        )}
-        
-        {interactionState !== 'idle' && (
+          {interactionState === 'idle' && (
+            <>
+              <Box className={classes.rippleEffect} sx={{ ...rippleStyles, animationDelay: '0s' }} />
+              <Box className={classes.rippleEffect} sx={{ ...rippleStyles, animationDelay: '0.6s' }} />
+              <Box className={classes.rippleEffect} sx={{ ...rippleStyles, animationDelay: '1.2s' }} />
+              <Box className={classes.rippleEffect} sx={{ ...rippleStyles, animationDelay: '1.8s' }} />
+            </>
+          )}
+          <BeautifulOrb
+            onClick={handleStartRecording}
+            disabled={interactionState !== 'idle'}
+            isActive={interactionState === 'listening' || interactionState === 'processing'}
+            isIdle={interactionState === 'idle'}
+            interactionState={interactionState}
+          />
+        </Box>
+        <Box sx={{ width: '300px', mt: 3, zIndex: 1 }}>
+          {['listening', 'processing'].includes(interactionState) && (
+            <>
+              <LinearProgress
+                variant={progressValue > 0 ? 'determinate' : 'indeterminate'}
+                value={progressValue}
+                sx={{
+                  bgcolor: theme.palette.secondary.main, // WAGO theme
+                  borderRadius: '10px',
+                  height: '8px',
+                  '& .MuiLinearProgress-bar': {
+                    background: `linear-gradient(90deg, ${theme.palette.primary.main}, ${theme.palette.secondary.main})`, // WAGO theme
+                    borderRadius: '10px',
+                  },
+                }}
+              />
+              <Typography
+                variant="body2"
+                sx={{
+                  mt: 2,
+                  color: 'rgba(255, 255, 255, 0.9)',
+                  fontWeight: 600, // WAGO theme
+                  textTransform: 'uppercase', // WAGO theme
+                  textShadow: '0 1px 3px rgba(0,0,0,0.3)',
+                }}
+              >
+                {progressMessage || 'Processing...'}
+              </Typography>
+            </>
+          )}
+        </Box>
+        <Box sx={{ mt: 4, zIndex: 1 }}>
           <Button
-            variant="outlined"
-            onClick={handleAbort}
+            variant="contained"
+            onClick={handlePlayLatestAudio}
             sx={{
-              ml: 2,
-              borderColor: 'rgba(255, 255, 255, 0.3)',
-              color: 'white',
+              mr: 2,
+              backgroundColor: theme.palette.primary.main, // WAGO green
               backdropFilter: 'blur(10px)',
+              border: `1px solid ${theme.palette.secondary.main}`, // WAGO secondary
               borderRadius: '25px',
               px: 3,
               py: 1.5,
+              textTransform: 'uppercase', // WAGO theme
+              fontWeight: 600, // WAGO theme
+              color: '#ffffff',
               '&:hover': {
-                borderColor: 'rgba(255, 255, 255, 0.5)',
-                backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                backgroundColor: theme.palette.primary.dark, // WAGO dark green
                 transform: 'translateY(-2px)',
+                boxShadow: `0 8px 25px ${theme.palette.primary.main}0.3`,
               },
-              fontWeight: 600,
+              textShadow: '0 1px 3px rgba(0,0,0,0.3)',
               transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
             }}
           >
-            Abort
+            Play Latest Audio
           </Button>
+          {showPlayButton && (
+            <Box sx={{ display: 'inline-flex', gap: 1 }}>
+              <IconButton
+                onClick={handlePlayAudio}
+                disabled={isPlaying}
+                sx={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  color: 'white',
+                  '&:hover': {
+                    backgroundColor: theme.palette.secondary.main, // WAGO secondary
+                    transform: 'scale(1.1)',
+                  },
+                  '&:disabled': {
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    color: 'rgba(255, 255, 255, 0.5)',
+                  },
+                  transition: 'all 0.3s ease',
+                }}
+              >
+                <PlayArrowIcon />
+              </IconButton>
+              <IconButton
+                onClick={handlePauseAudio}
+                disabled={!isPlaying}
+                sx={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  color: 'white',
+                  '&:hover': {
+                    backgroundColor: theme.palette.secondary.main, // WAGO secondary
+                    transform: 'scale(1.1)',
+                  },
+                  '&:disabled': {
+                    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                    color: 'rgba(255, 255, 255, 0.5)',
+                  },
+                  transition: 'all 0.3s ease',
+                }}
+              >
+                <PauseIcon />
+              </IconButton>
+              <IconButton
+                onClick={handleStopAudio}
+                sx={{
+                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                  backdropFilter: 'blur(10px)',
+                  border: '1px solid rgba(255, 255, 255, 0.2)',
+                  color: 'white',
+                  '&:hover': {
+                    backgroundColor: theme.palette.secondary.main, // WAGO secondary
+                    transform: 'scale(1.1)',
+                  },
+                  transition: 'all 0.3s ease',
+                }}
+              >
+                <StopIcon />
+              </IconButton>
+            </Box>
+          )}
+          {interactionState !== 'idle' && (
+            <Button
+              variant="outlined"
+              onClick={handleAbort}
+              sx={{
+                ml: 2,
+                borderColor: theme.palette.secondary.main, // WAGO secondary
+                color: 'white',
+                backdropFilter: 'blur(10px)',
+                borderRadius: '25px',
+                px: 3,
+                py: 1.5,
+                textTransform: 'uppercase', // WAGO theme
+                fontWeight: 600, // WAGO theme
+                '&:hover': {
+                  borderColor: 'rgba(255, 255, 255, 0.5)',
+                  backgroundColor: theme.palette.secondary.main, // WAGO secondary
+                  transform: 'translateY(-2px)',
+                },
+                transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+              }}
+            >
+              Abort
+            </Button>
+          )}
+        </Box>
+        {(transcription || fetchError) && (
+          <Box
+            sx={{
+              mt: 4,
+              p: 3,
+              maxWidth: '600px',
+              backgroundColor: 'rgba(255, 255, 255, 0.1)',
+              backdropFilter: 'blur(15px)',
+              borderRadius: '20px',
+              border: `1px solid ${theme.palette.secondary.main}`, // WAGO secondary
+              zIndex: 1,
+            }}
+          >
+            <Typography
+              variant="h6"
+              sx={{
+                color: 'white',
+                mb: 2,
+                fontWeight: 600, // WAGO theme
+                textTransform: 'uppercase', // WAGO theme
+                textShadow: '0 1px 3px rgba(0,0,0,0.3)',
+              }}
+            >
+              {fetchError ? 'Error' : 'Transcription'}
+            </Typography>
+            <Typography
+              variant="body1"
+              sx={{
+                color: 'rgba(255, 255, 255, 0.9)',
+                lineHeight: 1.6,
+                textTransform: fetchError ? 'uppercase' : 'none', // WAGO theme for errors
+                fontWeight: fetchError ? 600 : 'normal', // WAGO theme for errors
+              }}
+            >
+              {fetchError || transcription}
+            </Typography>
+          </Box>
         )}
       </Box>
-
-      {transcription && (
-        <Box sx={{ 
-          mt: 4, 
-          p: 3, 
-          maxWidth: '600px',
-          backgroundColor: 'rgba(255, 255, 255, 0.1)',
-          backdropFilter: 'blur(15px)',
-          borderRadius: '20px',
-          border: '1px solid rgba(255, 255, 255, 0.2)',
-          zIndex: 1,
-        }}>
-          <Typography variant="h6" sx={{ 
-            color: 'white', 
-            mb: 2,
-            fontWeight: 600,
-            textShadow: '0 1px 3px rgba(0,0,0,0.3)',
-          }}>
-            Transcription
-          </Typography>
-          <Typography variant="body1" sx={{ 
-            color: 'rgba(255, 255, 255, 0.9)',
-            lineHeight: 1.6,
-          }}>
-            {transcription}
-          </Typography>
-        </Box>
-      )}
-    </Box>
+    </ErrorBoundary>
   );
 };
 

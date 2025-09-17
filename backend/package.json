@@ -1,23 +1,26 @@
 {
-  "name": "docker-backend",
+  "name": "wago-ai-suite-backend",
   "version": "1.0.0",
-  "description": "Backend for Docker container control and file operations",
+  "description": "Backend for WAGO AI Suite container control and file operations",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
   "dependencies": {
-    "express": "^4.17.1",
-    "dockerode": "^3.3.1",
-	"moment":"^2.30.1",
-	"nodemailer":"^6.10.0",
-	"child_process":"^1.0.2",
-    "body-parser": "^1.19.0",
-	"multer":"^1.4.5-lts.2"
+    "express": "4.17.1",
+    "dockerode": "3.3.1",
+    "moment": "2.30.1",
+    "nodemailer": "6.10.0",
+    "http-proxy": "1.18.1",
+	"http-proxy-middleware": "^3.0.2",
+	"lodash": "^4.17.21",
+	"js-yaml": "^4.1.0",
+	"winston": "^3.8.2",
+    "multer": "1.4.5-lts.2"
   },
   "devDependencies": {
-    "nodemon": "^2.0.7"
+    "nodemon": "2.0.7"
   },
   "author": "Alexander Fugmann",
   "license": "MIT"

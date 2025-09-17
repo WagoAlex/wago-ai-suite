@@ -48,7 +48,13 @@ const fetchContainerLogs = async (containerName, setContainerLogs) => {
       return;
     }
     if (!response.ok) {
-      throw new Error(`Failed to fetch logs: ${response.status}`);
+      let errMsg = `Failed to fetch logs: ${response.status}`;
+      try {
+        const errData = await response.json();
+        errMsg = errData.error || errMsg;
+        if (errData.details) errMsg += ` - ${errData.details}`;
+      } catch {} // Fallback if not json
+      throw new Error(errMsg);
     }
     const logsText = await response.text();
     const logs = logsText.split('\n').filter(line => line.trim() !== '');
@@ -70,7 +76,13 @@ const fetchLatestLog = async (containerName, setLatestLogs) => {
       return;
     }
     if (!response.ok) {
-      throw new Error(`Failed to fetch log: ${response.status}`);
+      let errMsg = `Failed to fetch log: ${response.status}`;
+      try {
+        const errData = await response.json();
+        errMsg = errData.error || errMsg;
+        if (errData.details) errMsg += ` - ${errData.details}`;
+      } catch {} // Fallback if not json
+      throw new Error(errMsg);
     }
     const log = await response.text();
     setLatestLogs(prev => ({ ...prev, [containerName]: { log } }));

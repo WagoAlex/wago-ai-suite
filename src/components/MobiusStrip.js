@@ -49,8 +49,8 @@ const MobiusStrip = ({ onClick, disabled, isActive, isIdle }) => {
       >
         <defs>
           <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" style={{ stopColor: '#00A896', stopOpacity: 1 }} />
-            <stop offset="100%" style={{ stopColor: '#007A6C', stopOpacity: 1 }} />
+            <stop offset="0%" style={{ stopColor: '#f8f8ff ', stopOpacity: 1 }} />
+            <stop offset="100%" style={{ stopColor: '#d3d3d3 ', stopOpacity: 1 }} />
           </linearGradient>
         </defs>
         <path

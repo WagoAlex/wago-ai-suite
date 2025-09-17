@@ -53,9 +53,9 @@ function App() {
       }
     }
     const defaultWebhooks = N8N_WEBHOOKS || [
-      '/n8n/webhook-test/invoke_recording',
-      '/n8n/webhook-test/invoke_audio',
-      '/n8n/webhook-test/e104e40e-6134-4825-a6f0-8a646d882662/chat',
+      '/n8n/webhook-test/invoke_a',
+      '/n8n/webhook-test/invoke_b',
+      '/n8n/webhook-test/c/chat',
     ];
     return defaultWebhooks.map((url) =>
       url.startsWith('http://') || url.startsWith('https://') ? url : `https://${SERVER_NAME}${url}`
@@ -67,7 +67,7 @@ function App() {
   };
 
   const getInitialRemoteInferenceUrl = () => {
-    return localStorage.getItem('remoteInferenceUrl') || INFERENCE_URL || 'https://192.168.2.62:2376';
+    return localStorage.getItem('remoteInferenceUrl') || INFERENCE_URL || 'https://192.168.2.116:2376';
   };
 
   const [brokerUrl, setBrokerUrl] = useState(getInitialBrokerUrl());
@@ -119,14 +119,14 @@ function App() {
                 }
               />
               <Route path="/model" element={<Model />} />
-              <Route path="/chat" element={<Chat webhookUrls={webhookUrls} />} />
-              <Route path="/conversation" element={<Conversation webhookUrls={webhookUrls} />} />
-              <Route path="/dataflow" element={<Dataflow />} />
-              <Route path="/visualization" element={<Visualization />} />
+              //<Route path="/chat" element={<Chat webhookUrls={webhookUrls} />} />
+              //<Route path="/conversation" element={<Conversation webhookUrls={webhookUrls} />} />
+              //<Route path="/dataflow" element={<Dataflow />} />
+              //<Route path="/visualization" element={<Visualization />} />
 			  
-			  <Route path="/automation" element={<Automation />} />
+			  //<Route path="/automation" element={<Automation />} />
 			   
-			  <Route path="/Nodered" element={<Nodered />} />
+			  //<Route path="/Nodered" element={<Nodered />} />
 				
 			  
               <Route path="/status" element={<Status />} />
