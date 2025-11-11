@@ -1956,12 +1956,12 @@ To train your own variant of the model:
 - Increase threshold for fewer detections (higher precision)
 - Adjust `NMS_IOU_THRESHOLD` for overlapping detection handling
 
-**Multi-Camera Deployment**:
+**Planned: Multi-Camera Deployment**:
 - Deploy multiple Hailo AI containers with different camera streams
 - Use MQTT topics to differentiate: `inference/camera-{id}/results`
 - Aggregate results in Node-RED for centralized monitoring
 
-#### Repository Structure
+#### Possible Repository Structure
 ``` bash
 yolov5m-helmet-wago/
 ├── models/
