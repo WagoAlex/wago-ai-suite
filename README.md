@@ -1,577 +1,1021 @@
 # WAGO AI Suite
 
-> **A comprehensive containerized AI platform for industrial applications with React frontend, Node.js backend, and seamless integration of ML/AI tools including Label Studio, n8n automation, Grafana visualization, and real-time inference capabilities.**
+> Enterprise-grade AI application suite optimized for edge deployment with local inference capabilities
 
-[![Version](https://img.shields.io/badge/version-1.6-brightgreen.svg)](https://github.com/WagoAlex/wago-ai-suite)
-[![License](https://img.shields.io/badge/license-MPL--2.0-blue.svg)](LICENSE)
-[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](docker-compose.yml)
-
-## 🚀 Quick Start
-
-```bash
-# 1. Clone the repository
-git clone https://github.com/WagoAlex/wago-ai-suite.git
-cd wago-ai-suite
-
-# 2. Configure environment
-cp .env.example .env
-# Edit .env with your specific settings
-
-# 3. Deploy with Docker Compose
-docker-compose up -d
-
-# 4. Access the suite
-open https://your-server-ip
-```
+[![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
+[![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
+[![Version](https://img.shields.io/badge/version-1.7-blue.svg)]()
 
 ## 📋 Table of Contents
 
-- [Features](#-features)
-- [Architecture](#-architecture)
-- [Prerequisites](#-prerequisites)
-- [Installation](#-installation)
-- [Configuration](#-configuration)
-- [Usage](#-usage)
-- [API Documentation](#-api-documentation)
-- [Development](#-development)
-- [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Deployment](#deployment)
+- [Integrated Services](#integrated-services)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+- [License](#license)
 
-## ✨ Features
+## 🎯 Overview
 
-### 🤖 AI & Machine Learning
-- **Visual Inference**: Real-time object detection with webcam/RTSP streams
-- **Conversational AI**: Voice and text-based AI interactions
-- **Model Training**: Jupyter notebooks for custom model development
-- **Data Annotation**: Integrated Label Studio for dataset preparation
+WAGO AI Suite is a containerized application platform designed for deploying and managing AI workloads on edge devices. It provides a unified interface for model visualization, data labeling, workflow automation, and real-time inference with a focus on energy efficiency and local execution.
 
-### 🔧 Automation & Integration
-- **n8n Workflows**: Visual automation for AI pipelines
-- **Node-RED**: IoT data processing and integration
-- **MQTT Support**: Real-time messaging for IoT devices
-- **RESTful APIs**: Complete backend API for all operations
+### Business Value
 
-### 📊 Monitoring & Visualization with WAGO App Analytics
-- **Grafana Dashboards**: Real-time analytics and metrics
-- **Node-RED Integration**: Advanced IoT data processing
-- **Pre-configured Analytics**: Works seamlessly with WAGO App Analytics (WAA)
-- **Container Management**: Live container status and logs
-- **System Status**: Health monitoring for all services
-- **Data Flow Visualization**: Interactive MQTT topic mapping
+- **Edge-First Design**: Optimized for local execution, reducing latency and cloud dependencies
+- **Energy Efficient**: Purpose-built for resource-constrained environments
+- **Scalable Architecture**: Modular design allows selective deployment of components
+- **Enterprise Ready**: Production-grade security with HTTPS, authentication, and monitoring
 
-> **📋 Note**: This suite integrates perfectly with **WAGO App Analytics (WAA)** which typically uses the predefined network `waa-networks`. For the complete WAGO App Analytics solution, visit: [WAGO Download Center - App Analytics](https://downloadcenter.wago.com/wago/solution/details/m7d6fq3g6kbg604hre4)
+## ✨ Key Features
 
-### 🛡️ Enterprise Ready
-- **SSL/TLS Security**: Self-signed or custom certificates
-- **Docker Orchestration**: Scalable containerized deployment
-- **NGINX Reverse Proxy**: Optimized routing and load balancing
-- **Role-based Access**: Configurable authentication
+### Core Capabilities
+
+- **Model Visualization**: Integrated Netron for neural network architecture inspection
+- **Data Annotation**: Label Studio integration for dataset creation and management
+- **Workflow Automation**: Node-RED and n8n for visual programming and automation
+- **Real-time Monitoring**: Grafana dashboards for system and model performance
+- **Interactive Development**: JupyterLab environment for experimentation
+- **MQTT Integration**: Real-time messaging for inference requests and results
+- **Video Processing**: RTSP stream handling with inference capabilities
+- **Multi-Platform Support**: GPU and CPU inference options
+
+### Technical Highlights
+
+- Containerized microservices architecture
+- NGINX reverse proxy with SSL/TLS termination
+- WebSocket support for real-time communication
+- Cross-Origin Resource Sharing (CORS) enabled
+- Docker Compose orchestration
+- Automated build pipeline with versioning
 
 ## 🏗️ Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    NGINX Reverse Proxy                     │
-│                     (Port 80/443)                          │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-┌─────────────────────┼───────────────────────────────────────┐
-│                React Frontend                               │
-│            (Embedded in NGINX)                             │
-└─────────────────────┬───────────────────────────────────────┘
-                      │
-              ┌───────┴───────┐
-              │               │
-    ┌─────────▼──────┐ ┌─────▼──────────┐
-    │   Backend API  │ │  External APIs │
-    │   (Port 3042)  │ │   & Services   │
-    └─────────┬──────┘ └────────────────┘
-              │
-    ┌─────────▼──────────────────────────┐
-    │            Services Layer          │
-    │  ┌──────────┐ ┌─────────────────┐  │
-    │  │Label     │ │n8n    │Node-RED │  │
-    │  │Studio    │ │       │         │  │
-    │  └──────────┘ └─────────────────┘  │
-    │  ┌──────────┐ ┌─────────────────┐  │
-    │  │Grafana   │ │Jupyter│MQTT     │  │
-    │  │          │ │       │Broker   │  │
-    │  └──────────┘ └─────────────────┘  │
-    └────────────────────────────────────┘
+│                     NGINX (Port 443/80)                      │
+│                   SSL/TLS Termination                        │
+└────────────┬────────────────────────────────────────────────┘
+             │
+    ┌────────┴────────┐
+    │                 │
+┌───▼────┐      ┌────▼─────┐
+│ React  │      │ Backend  │
+│   UI   │      │   API    │
+│        │      │ (Node.js)│
+└───┬────┘      └────┬─────┘
+    │                │
+    │   ┌────────────┴──────────────┬──────────────┐
+    │   │                           │              │
+┌───▼───▼────┐  ┌──────────┐  ┌────▼─────┐  ┌────▼────────┐
+│ Label      │  │ Grafana  │  │ Jupyter  │  │ Node-RED    │
+│ Studio     │  │          │  │ Lab      │  │ / n8n       │
+└────────────┘  └──────────┘  └──────────┘  └─────────────┘
+                                                    │
+                                              ┌─────▼─────┐
+                                              │ Inference │
+                                              │  Engine   │
+                                              └───────────┘
 ```
 
-## 📋 Prerequisites
+### Component Breakdown
+
+| Component | Purpose | Port | Technology |
+|-----------|---------|------|------------|
+| **Frontend** | Web UI | 443, 80 | React 18, Material-UI |
+| **Backend** | REST API | 3042, 3443 | Node.js, Express |
+| **Label Studio** | Data annotation | 8080 | Python/Django |
+| **Grafana** | Monitoring | 5000 | Go |
+| **JupyterLab** | Development | 8888 | Python |
+| **Node-RED** | Automation | 5101 | Node.js |
+| **n8n** | Workflow automation | 5678 | Node.js |
+| **MQTT Broker** | Messaging | 9001 | Mosquitto |
+
+## 📦 Prerequisites
 
 ### System Requirements
-- **OS**: Linux (Debian 10+ / Ubuntu 20.04+ recommended)
-- **CPU**: 4+ cores
-- **RAM**: 8GB+ (16GB recommended for ML workloads)
-- **Storage**: 50GB+ free space
-- **Network**: Static IP recommended
+
+- **Operating System**: Linux (Ubuntu 20.04+ recommended)
+- **Docker**: Version 20.10+
+- **Docker Compose**: Version 2.0+
+- **Memory**: Minimum 8GB RAM (16GB recommended)
+- **Storage**: 20GB available space
+- **Network**: Static IP or dynamic DNS
+
+### Optional Requirements
+
+- **GPU Support**: NVIDIA Docker runtime for GPU-accelerated inference
+- **Certificates**: Valid SSL certificates (self-signed included for testing)
 
 ### Software Dependencies
-- **Docker**: 20.10+
-- **Docker Compose**: 2.0+
-- **Git**: 2.30+
-- **OpenSSL**: For certificate generation
-
-### Hardware Support (Optional)
-- **GPU**: NVIDIA GPU with CUDA support for ML acceleration
-- **Camera**: USB webcam for visual inference
-- **RTSP Cameras**: IP cameras for video streaming
-
-## 🔧 Installation
-
-### Method 1: Quick Deploy (Recommended)
 
 ```bash
-# Download and run the installer
-curl -fsSL https://raw.githubusercontent.com/WagoAlex/wago-ai-suite/main/install.sh | bash
+# Install Docker
+curl -fsSL https://get.docker.com -o get-docker.sh
+sudo sh get-docker.sh
+
+# Install Docker Compose
+sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
 ```
 
-### Method 2: Manual Installation
+## 🚀 Quick Start
 
-#### Step 1: Clone Repository
+### 1. Clone or Extract Project
+
 ```bash
-git clone https://github.com/WagoAlex/wago-ai-suite.git
+# If using git
+git clone <repository-url>
+cd wago-ai-suite
+
+# Or extract archive
+tar -xzf wago-ai-suite.tar.gz
 cd wago-ai-suite
 ```
 
-#### Step 2: Environment Configuration
-```bash
-# Copy environment template
-cp .env.example .env
+### 2. Configure Environment
 
-# Edit configuration
+```bash
+# Copy and edit environment file
+cp .env.example .env
 nano .env
 ```
 
-#### Step 3: Network Setup
-```bash
-# For WAGO App Analytics integration (recommended)
-docker network create waa_cm_network
+**Minimum Required Configuration:**
 
-# Alternative: Use existing WAA network
-# docker network ls | grep waa-networks
-# docker network connect waa-networks container-name
+```bash
+# Server Configuration
+SERVER_NAME=192.168.1.100  # Your server IP address
+INFERENCE_URL=192.168.1.100  # Inference server IP (can be same as SERVER_NAME)
+
+# Backend API Key (generate secure key)
+API_KEY="your-secure-api-key-here"
+
+# React App URLs
+REACT_APP_SERVER_NAME=192.168.1.100
+REACT_APP_MQTT_BROKER_URL=wss://192.168.1.100/mqtt
 ```
 
-#### Step 4: SSL Certificates (Production)
-```bash
-# Generate self-signed certificates
-./scripts/generate-ssl.sh
+### 3. Build Images
 
-# OR use your own certificates
-cp your-cert.crt ssl/selfsigned.crt
-cp your-key.key ssl/selfsigned.key
+```bash
+# Make build script executable
+chmod +x build-was.sh
+
+# Build all images
+./build-was.sh
 ```
 
-#### Step 5: Deploy Services
+### 4. Deploy Services
+
 ```bash
-# Deploy all services
+# Create required directories
+sudo mkdir -p /docker/tests
+sudo mkdir -p /docker/local-ai/labelstudio/{data,files}
+
+# Start services
 docker-compose up -d
 
 # Verify deployment
 docker-compose ps
 ```
 
-### Integration with WAGO App Analytics
+### 5. Access Application
 
-If you're using **WAGO App Analytics (WAA)**, ensure network compatibility:
+Open your browser and navigate to:
 
-```bash
-# Check existing WAA networks
-docker network ls | grep waa
-
-# Connect to existing WAA network (if available)
-docker network connect waa-networks wago-ai-suite
-docker network connect waa-networks wago-ai-suite-backend
-docker network connect waa-networks wago-label-studio
-
-# Verify network connectivity
-docker exec wago-ai-suite ping grafana-container-name
+```
+https://192.168.1.100  (replace with your SERVER_NAME)
 ```
 
-> **💡 Tip**: For complete WAGO App Analytics integration, download the full solution from [WAGO Download Center](https://downloadcenter.wago.com/wago/solution/details/m7d6fq3g6kbg604hre4)
+**Note**: You'll need to accept the self-signed certificate warning for initial testing.
 
 ## ⚙️ Configuration
 
-### Environment Variables (.env)
+### Environment Variables
+
+#### Core Settings
+
+| Variable | Description | Example | Required |
+|----------|-------------|---------|----------|
+| `SERVER_NAME` | Host IP/domain for services | `192.168.2.181` | ✅ |
+| `INFERENCE_URL` | Inference server address | `192.168.2.116` | ✅ |
+| `API_KEY` | Backend authentication key | `j}b9Q~#zsJOhR~LH-<` | ✅ |
+| `BACKEND_PORT` | Backend HTTP port | `3042` | ❌ |
+| `BACKEND_HTTPS_PORT` | Backend HTTPS port | `3443` | ❌ |
+
+#### React Application
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `REACT_APP_MQTT_BROKER_URL` | WebSocket MQTT URL | `wss://${SERVER_NAME}/mqtt` |
+| `REACT_APP_BACKEND_API_URL` | Backend API endpoint | `https://wago-ai-suite-backend:3042` |
+| `REACT_APP_N8N_API_URL` | n8n workflow API | `/n8n` |
+| `REACT_APP_VERSION` | Application version | Auto-incremented |
+
+#### MQTT Topics
 
 ```bash
-# === CORE SETTINGS ===
-SERVER_NAME=192.168.1.100          # Your server IP/domain
-INFERENCE_URL=192.168.1.101         # Remote inference server (optional)
-
-# === AUTHENTICATION ===
-API_KEY="your-secure-api-key"       # Backend API security
-REACT_APP_N8N_REST_API_KEY="jwt-token"  # n8n authentication
-
-# === MQTT CONFIGURATION ===
-REACT_APP_MQTT_BROKER_URL=wss://192.168.1.100/mqtt
+REACT_APP_MQTT_TRANSCRIPTION_TOPIC=agent/audio/transcription
+REACT_APP_MQTT_RESPONSE_TOPIC=agent/audio/response
+REACT_APP_MQTT_INPUT_TOPIC=agent/audio/input
 REACT_APP_MQTT_START_TOPIC=agent/audio/start
-
-# === N8N WEBHOOKS ===
-REACT_APP_WEBHOOK_URL="/n8n/webhook-test/invoke_recording /n8n/webhook-test/invoke_audio"
-
-# === VERSION ===
-REACT_APP_VERSION=1.6
+REACT_APP_MQTT_INFERENCE_TOPIC=inference/#
 ```
+
+### SSL/TLS Configuration
+
+#### Using Self-Signed Certificates (Development)
+
+Self-signed certificates are included at:
+- `ssl/selfsigned.crt`
+- `ssl/selfsigned.key`
+
+#### Using Custom Certificates (Production)
+
+```bash
+# Replace certificates
+cp your-certificate.crt ssl/selfsigned.crt
+cp your-private-key.key ssl/selfsigned.key
+
+# Update backend certificates
+cp your-backend-cert.crt backend/ssl/backend-selfsigned.crt
+cp your-backend-key.key backend/ssl/backend-selfsigned.key
+
+# Rebuild and restart
+./build-was.sh
+docker-compose restart
+```
+
+### Network Configuration
+
+#### Docker Network
+
+The suite uses an external Docker network:
+
+```bash
+# Create network if it doesn't exist
+docker network create waa_cm_network
+```
+
+#### Port Mapping
+
+| Service | Internal Port | External Port | Protocol |
+|---------|--------------|---------------|----------|
+| Frontend | 443 | 443 | HTTPS |
+| Frontend | 80 | 80 | HTTP |
+| Backend | 3042 | 3042 | HTTP |
+| Backend | 3443 | 3443 | HTTPS |
+| Label Studio | 8080 | 8080 | HTTP |
 
 ### Service-Specific Configuration
 
 #### Label Studio
+
 ```yaml
-# Default credentials (change in production)
-LABEL_STUDIO_USERNAME: "admin@company.com"
-LABEL_STUDIO_PASSWORD: "secure-password"
+environment:
+  LABEL_STUDIO_USERNAME: "your-email@domain.com"
+  LABEL_STUDIO_PASSWORD: "your-secure-password"
+  LABEL_STUDIO_HOST: "https://${SERVER_NAME}/labelstudio"
 ```
 
-#### Grafana
-```yaml
-# Access via /grafana/
-# Default: admin/admin
-```
+#### RTSP Video Stream
 
-#### n8n
-```yaml
-# Access via /n8n/
-# Configure workflows for automation
-```
-
-## 📖 Usage
-
-### 1. Access the Web Interface
-
-Navigate to `https://your-server-ip` and explore the main dashboard:
-
-- **🏠 Home**: Quick access to all features
-- **🤖 AI Model**: Jupyter notebooks and model training
-- **👁️ Visual Inference**: Real-time object detection
-- **💬 Chat/Conversation**: AI interactions
-- **📊 Visualization**: Grafana dashboards
-- **🔧 Automation**: n8n and Node-RED workflows
-
-### 2. Setting Up Visual Inference
-
-```javascript
-// Example: Start webcam inference
-const response = await fetch('/api/containers/start', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    inferenceServerType: 'local',
-    source: 'webcam'
-  })
-});
-```
-
-### 3. Creating Automation Workflows
-
-Access n8n at `/n8n/` to create workflows:
-1. Connect MQTT nodes for IoT data
-2. Add AI processing nodes
-3. Route results to databases or APIs
-4. Set up triggers and schedules
-
-### 4. Data Annotation with Label Studio
-
-1. Access Label Studio at `/labelstudio/`
-2. Create a new project
-3. Upload your datasets
-4. Configure labeling interface
-5. Start annotating for model training
-
-### 5. MQTT Integration
-
-```python
-# Python example for MQTT publishing
-import paho.mqtt.client as mqtt
-
-client = mqtt.Client()
-client.connect("your-server-ip", 1883, 60)
-client.publish("agent/audio/start", '{"command": "start"}')
-```
-
-## 🔌 API Documentation
-
-### Container Management
 ```bash
-# Start container
-POST /api/containers/:name/start
-Body: {
-  "inferenceServerType": "local|remote",
-  "remoteInferenceUrl": "https://remote-server:2376"
-}
-
-# Get container status
-GET /api/containers/:name/status
-
-# Get container logs
-GET /api/containers/:name/logs?lines=100
+RTSP_URL=rtsp://username:password@camera-ip:554/stream
 ```
 
-### Video Streaming
+## 🚢 Deployment
+
+### Production Deployment
+
+#### 1. Security Hardening
+
 ```bash
-# Stream webcam
-GET /api/video/stream?source=webcam
+# Generate strong API key
+API_KEY=$(openssl rand -base64 32)
 
-# Stream RTSP
-GET /api/video/stream?source=rtsp&rtspUrl=rtsp://camera-ip/stream
+# Update .env file
+echo "API_KEY=$API_KEY" >> .env
+
+# Set proper file permissions
+chmod 600 .env
+chmod 600 backend/ssl/*
+chmod 600 ssl/*
 ```
 
-### Authentication
+#### 2. Configure Firewall
+
 ```bash
-# All API requests require API key header
-Authorization: Bearer your-api-key
+# Allow HTTPS
+sudo ufw allow 443/tcp
+
+# Allow HTTP (for redirect)
+sudo ufw allow 80/tcp
+
+# Allow Backend API (if needed externally)
+sudo ufw allow 3042/tcp
+sudo ufw allow 3443/tcp
 ```
 
-## 💻 Development
+#### 3. Deploy with Auto-Restart
+
+```bash
+# Services restart automatically with 'unless-stopped' policy
+docker-compose up -d
+
+# Enable Docker to start on boot
+sudo systemctl enable docker
+```
+
+#### 4. Monitoring
+
+```bash
+# View logs
+docker-compose logs -f
+
+# Check service health
+docker-compose ps
+
+# Monitor resources
+docker stats
+```
+
+### Scaling Considerations
+
+#### Vertical Scaling
+- Increase container memory limits in `docker-compose.yml`
+- Add more CPU cores to host system
+
+#### Horizontal Scaling
+- Deploy multiple inference backend instances
+- Use load balancer for frontend (not included)
+- Separate databases for Label Studio
+
+### Backup and Recovery
+
+#### Backup Data Volumes
+
+```bash
+#!/bin/bash
+# backup-was.sh
+
+BACKUP_DIR="/backup/was-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+
+# Backup Label Studio data
+docker cp wago-label-studio:/label-studio/data "$BACKUP_DIR/labelstudio-data"
+
+# Backup environment
+cp .env "$BACKUP_DIR/"
+
+# Backup certificates
+cp -r ssl "$BACKUP_DIR/"
+
+echo "Backup completed: $BACKUP_DIR"
+```
+
+#### Restore
+
+```bash
+# Stop services
+docker-compose down
+
+# Restore data
+cp -r /backup/was-20240101/labelstudio-data/* /docker/local-ai/labelstudio/data/
+
+# Restore configuration
+cp /backup/was-20240101/.env .env
+
+# Restart services
+docker-compose up -d
+```
+
+## 🔌 Integrated Services
+
+### Label Studio (Data Annotation)
+
+**Access**: `https://{SERVER_NAME}/labelstudio/`
+
+**Features**:
+- Image, text, audio, video annotation
+- Custom labeling configurations
+- Export to multiple formats (COCO, YOLO, CSV)
+- Collaborative annotation workflows
+
+**Quick Start**:
+1. Login with credentials from `.env`
+2. Create new project
+3. Import data
+4. Define labeling interface
+5. Start annotating
+
+### Grafana (Monitoring)
+
+**Access**: `https://{SERVER_NAME}/grafana/`
+
+**Default Credentials**: Check host system configuration
+
+**Use Cases**:
+- System metrics (CPU, memory, disk)
+- Model inference performance
+- MQTT message statistics
+- Custom dashboards
+
+### JupyterLab (Development)
+
+**Access**: `https://{SERVER_NAME}/jupyter/`
+
+**Features**:
+- Python notebook environment
+- Terminal access
+- File browser
+- Extension ecosystem
+
+**Typical Workflows**:
+- Model prototyping
+- Data exploration
+- Performance profiling
+- Documentation
+
+### Node-RED (Visual Programming)
+
+**Access**: `https://{SERVER_NAME}/nodered/`
+
+**Features**:
+- Visual flow-based programming
+- MQTT integration
+- HTTP request handling
+- Database connectors
+
+**Example Use Cases**:
+- MQTT message routing
+- Data transformation pipelines
+- API integrations
+- Scheduled tasks
+
+### n8n (Workflow Automation)
+
+**Access**: `https://{SERVER_NAME}/n8n/`
+
+**Features**:
+- 200+ integrations
+- Webhook support
+- Scheduled workflows
+- Conditional logic
+
+**Example Workflows**:
+- Inference result notifications
+- Data pipeline automation
+- System health checks
+- Report generation
+
+### Netron (Model Visualization)
+
+**Access**: `https://{SERVER_NAME}/netron/`
+
+**Supported Formats**:
+- ONNX (.onnx)
+- TensorFlow (.pb, .meta)
+- PyTorch (.pt, .pth)
+- Keras (.h5, .keras)
+- TensorFlow Lite (.tflite)
+
+**Usage**:
+1. Navigate to Netron interface
+2. Upload or provide URL to model file
+3. Explore architecture visually
+4. Export diagrams
+
+## 🛠️ Development
 
 ### Local Development Setup
 
-```bash
-# Backend development
-cd backend
-npm install
-npm run dev
+#### Frontend Development
 
-# Frontend development
-npm install
+```bash
+# Install dependencies
+npm install --legacy-peer-deps
+
+# Start development server
 npm start
 
-# Build production images
-./build2.sh
+# Build for production
+npm run build
+```
+
+#### Backend Development
+
+```bash
+cd backend
+
+# Install dependencies
+npm install
+
+# Start development server
+node index.js
 ```
 
 ### Project Structure
+
 ```
 wago-ai-suite/
-├── src/                    # React frontend source
-│   ├── components/         # UI components
-│   ├── assets/            # Static assets
-│   └── theme.js           # WAGO CI theme
-├── backend/               # Node.js backend
-│   ├── index.js          # Main server file
-│   └── ssl/              # Backend certificates
-├── public/               # Static files
-│   └── netron/          # Embedded Netron viewer
-├── ssl/                  # Frontend certificates
-├── docker-compose.yml    # Service orchestration
-├── nginx.conf.template   # Proxy configuration
-└── .env                 # Environment variables
+├── src/                      # React application source
+│   ├── components/          # React components
+│   ├── assets/              # Static assets
+│   └── config/              # Configuration files
+├── backend/                 # Node.js backend
+│   ├── index.js            # Main server file
+│   └── ssl/                # Backend certificates
+├── public/                  # Public assets
+├── nginx.conf.template     # NGINX configuration template
+├── docker-compose.yml      # Service orchestration
+├── Dockerfile              # Frontend container image
+├── build-was.sh            # Build automation script
+└── .env                    # Environment configuration
 ```
 
-### Adding New Features
+### Adding New Components
 
-1. **Frontend Components**:
-   ```bash
-   # Create new component
-   touch src/components/NewFeature.js
-   
-   # Add route in App.js
-   <Route path="/new-feature" element={<NewFeature />} />
-   ```
+#### 1. Create React Component
 
-2. **Backend APIs**:
-   ```javascript
-   // Add endpoint in backend/index.js
-   app.get('/api/new-feature', (req, res) => {
-     res.json({ message: 'New feature endpoint' });
-   });
-   ```
+```javascript
+// src/components/NewComponent.js
+import React from 'react';
 
-3. **Docker Services**:
-   ```yaml
-   # Add to docker-compose.yml
-   new-service:
-     image: your-image:latest
-     networks:
-       - waa_cm_network
-   ```
+const NewComponent = () => {
+  return (
+    <div>
+      <h1>New Component</h1>
+    </div>
+  );
+};
 
-### Testing
-
-```bash
-# Run frontend tests
-npm test
-
-# Test container health
-docker-compose exec wago-ai-suite-backend curl http://localhost:3042/api/containers
-
-# Test NGINX routing
-curl -k https://your-server-ip/labelstudio/
+export default NewComponent;
 ```
 
-## 🐛 Troubleshooting
+#### 2. Add Route
 
-### Common Issues
+```javascript
+// src/App.js
+import NewComponent from './components/NewComponent';
 
-#### 1. Label Studio Static Files Not Loading
+// Add to routes
+<Route path="/new-component" element={<NewComponent />} />
+```
+
+#### 3. Add to Navigation
+
+```javascript
+// src/components/Layout.js or BurgerMenu.js
+<MenuItem onClick={() => navigate('/new-component')}>
+  New Component
+</MenuItem>
+```
+
+### Building Custom Images
+
+#### Frontend Image
+
 ```bash
-# Check NGINX logs
-docker logs wago-ai-suite 2>&1 | grep labelstudio
+docker build \
+  --build-arg REACT_APP_VERSION="1.0.0" \
+  -t wagoalex/wago-ai-suite-ui:custom \
+  .
+```
 
-# Verify container status
-docker exec wago-label-studio curl http://localhost:8080/static/css/main.css
+#### Backend Image
 
-# Solution: Restart with updated config
+```bash
+docker build \
+  -t wagoalex/wago-ai-suite-backend:custom \
+  backend
+```
+
+### Customizing NGINX Configuration
+
+Edit `nginx.conf.template` to add new proxy rules:
+
+```nginx
+location /custom-service/ {
+    proxy_pass http://custom-service:8080/;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+}
+```
+
+Then rebuild and restart:
+
+```bash
+./build-was.sh
 docker-compose restart wago-ai-suite
 ```
 
-#### 2. MQTT Connection Failed
+## 🔧 Troubleshooting
+
+### Common Issues
+
+#### 1. Certificate Warnings
+
+**Problem**: Browser shows SSL certificate warning
+
+**Solution**:
 ```bash
-# Check broker status
-docker logs mqtt-broker
-
-# Test connection
-mosquitto_pub -h your-server-ip -p 1883 -t test -m "hello"
-
-# Check firewall
-sudo ufw status
+# For development, accept self-signed certificate
+# For production, install valid certificate:
+cp production.crt ssl/selfsigned.crt
+cp production.key ssl/selfsigned.key
+docker-compose restart
 ```
 
-#### 3. SSL Certificate Issues
-```bash
-# Regenerate certificates
-./scripts/generate-ssl.sh
+#### 2. Services Not Accessible
 
-# Update Docker volumes
-docker-compose down
-docker-compose up -d
+**Problem**: Cannot access services at configured URLs
+
+**Diagnosis**:
+```bash
+# Check if containers are running
+docker-compose ps
+
+# Check logs
+docker-compose logs -f wago-ai-suite
+
+# Verify NGINX configuration
+docker exec wago-ai-suite nginx -t
+
+# Check network connectivity
+docker exec wago-ai-suite ping -c 3 wago-ai-suite-backend
 ```
 
-#### 4. Container Startup Failures
+**Solution**:
 ```bash
-# Check resource usage
-docker stats
-
-# View detailed logs
-docker-compose logs service-name
-
-# Reset containers
-docker-compose down --volumes
-docker-compose up -d
-```
-
-### Debug Mode
-
-Enable debug logging:
-```bash
-# Set in .env
-DEBUG=true
-NGINX_LOG_LEVEL=debug
-
 # Restart services
 docker-compose restart
+
+# Rebuild if configuration changed
+./build-was.sh
+docker-compose up -d
+```
+
+#### 3. MQTT Connection Failed
+
+**Problem**: Frontend cannot connect to MQTT broker
+
+**Check**:
+```bash
+# Verify MQTT broker is running
+docker ps | grep mqtt
+
+# Test MQTT connection
+mosquitto_sub -h $SERVER_NAME -p 9001 -t test -v
+```
+
+**Solution**:
+- Verify `REACT_APP_MQTT_BROKER_URL` in `.env`
+- Ensure WebSocket port 9001 is accessible
+- Check firewall rules
+
+#### 4. Label Studio iframe Issues
+
+**Problem**: Label Studio not loading in iframe
+
+**Solution**:
+```bash
+# Verify environment variables
+docker exec wago-label-studio env | grep LABEL_STUDIO
+
+# Check NGINX configuration for CSP headers
+docker exec wago-ai-suite cat /etc/nginx/conf.d/default.conf | grep -A 5 labelstudio
+```
+
+#### 5. Out of Memory
+
+**Problem**: Services crash or slow performance
+
+**Solution**:
+```yaml
+# Add memory limits to docker-compose.yml
+services:
+  wago-ai-suite:
+    mem_limit: 4g
+    mem_reservation: 2g
+```
+
+#### 6. Port Conflicts
+
+**Problem**: Cannot start container due to port already in use
+
+**Diagnosis**:
+```bash
+# Check what's using the port
+sudo netstat -tulpn | grep :443
+sudo lsof -i :443
+```
+
+**Solution**:
+```bash
+# Stop conflicting service
+sudo systemctl stop apache2  # or nginx, if running on host
+
+# Or change port in docker-compose.yml
+ports:
+  - "8443:443"  # Use alternative external port
+```
+
+### Logging
+
+#### View All Logs
+
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f wago-ai-suite
+docker-compose logs -f wago-ai-suite-backend
+docker-compose logs -f wago-label-studio
+```
+
+#### NGINX Logs
+
+```bash
+# Access logs
+docker exec wago-ai-suite tail -f /var/log/nginx/access.log
+
+# Error logs
+docker exec wago-ai-suite tail -f /var/log/nginx/error.log
+
+# Service-specific logs
+docker exec wago-ai-suite tail -f /var/log/nginx/jupyter.log
+docker exec wago-ai-suite tail -f /var/log/nginx/labelstudio.log
+```
+
+#### Backend Logs
+
+```bash
+docker exec wago-ai-suite-backend cat /var/log/backend.log
 ```
 
 ### Performance Optimization
 
+#### 1. Resource Limits
+
+```yaml
+# docker-compose.yml
+services:
+  wago-ai-suite:
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+```
+
+#### 2. Log Rotation
+
+Configured in `docker-compose.yml`:
+```yaml
+logging:
+  driver: "json-file"
+  options:
+    max-size: "5m"
+    max-file: "1"
+```
+
+#### 3. Caching
+
+NGINX caching is configured for static assets:
+```nginx
+location /labelstudio/static/ {
+    expires 1d;
+    add_header Cache-Control "public, max-age=86400";
+}
+```
+
+### Getting Help
+
+1. **Check Logs**: Always start with container logs
+2. **Verify Configuration**: Use `docker exec` to inspect running configuration
+3. **Network Issues**: Use `docker exec <container> ping` to test connectivity
+4. **Documentation**: Review official docs for integrated services
+5. **Community**: Check Docker and service-specific forums
+
+## 📊 Monitoring and Maintenance
+
+### Health Checks
+
 ```bash
-# Monitor resource usage
-htop
-docker stats
+# Check all services
+docker-compose ps
 
-# Optimize Docker
-docker system prune -f
-docker volume prune -f
+# Health check script
+#!/bin/bash
+curl -k https://$SERVER_NAME/api/health
+curl -k https://$SERVER_NAME/labelstudio/health/
+```
 
-# Tune NGINX
-# Edit nginx.conf.template worker processes
+### Regular Maintenance
+
+#### Weekly Tasks
+- Review logs for errors
+- Check disk space usage
+- Verify backup completion
+
+```bash
+# Disk usage
+docker system df
+
+# Clean up unused images
+docker image prune -a
+
+# Clean up unused volumes
+docker volume prune
+```
+
+#### Monthly Tasks
+- Update container images
+- Rotate logs manually if needed
+- Review security patches
+
+```bash
+# Pull latest images
+docker-compose pull
+
+# Recreate containers
+docker-compose up -d
+```
+
+### Updates and Upgrades
+
+#### Update Process
+
+```bash
+# 1. Backup current state
+./backup-was.sh
+
+# 2. Pull latest images
+docker-compose pull
+
+# 3. Stop services
+docker-compose down
+
+# 4. Start with new images
+docker-compose up -d
+
+# 5. Verify
+docker-compose ps
+docker-compose logs -f
+```
+
+#### Rollback
+
+```bash
+# Stop current version
+docker-compose down
+
+# Use specific version
+docker-compose --file docker-compose.yml pull
+docker tag wagoalex/wago-ai-suite-ui:1.6 wagoalex/wago-ai-suite-ui:latest
+
+# Start services
+docker-compose up -d
 ```
 
 ## 🤝 Contributing
 
 ### Development Workflow
 
-1. **Fork & Clone**
-   ```bash
-   git clone https://github.com/your-username/wago-ai-suite.git
-   cd wago-ai-suite
-   ```
-
+1. **Fork Repository**
 2. **Create Feature Branch**
    ```bash
    git checkout -b feature/your-feature-name
    ```
-
-3. **Development**
+3. **Make Changes**
+4. **Test Locally**
    ```bash
-   # Make your changes
-   # Test thoroughly
-   npm test
+   ./build-was.sh
    docker-compose up -d
    ```
-
-4. **Commit & Push**
+5. **Commit Changes**
    ```bash
-   git add .
-   git commit -m "feat: add your feature description"
-   git push origin feature/your-feature-name
+   git commit -m "Add: description of changes"
    ```
+6. **Push and Create Pull Request**
 
-5. **Create Pull Request**
-   - Describe your changes
-   - Include screenshots if UI changes
-   - Reference any related issues
+### Code Standards
 
-### Code Style
+- **JavaScript**: Follow Airbnb style guide
+- **React**: Use functional components with hooks
+- **Docker**: Multi-stage builds preferred
+- **Documentation**: Update README for new features
 
-- **Frontend**: ESLint + Prettier
-- **Backend**: Node.js best practices
-- **Docker**: Multi-stage builds
-- **Documentation**: Markdown with examples
+### Testing
 
-### Reporting Issues
+```bash
+# Frontend tests
+npm test
 
-Use GitHub Issues with:
-- Clear description
-- Steps to reproduce
-- Environment details
-- Docker logs if relevant
+# Backend tests (if available)
+cd backend && npm test
+
+# Integration tests
+docker-compose -f docker-compose.test.yml up --abort-on-container-exit
+```
 
 ## 📄 License
 
-This project is licensed under the Mozilla Public License 2.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the **Mozilla Public License Version 2.0** (MPL-2.0).
 
+See [LICENSE](LICENSE) file for full text.
+
+### Key Points
+
+- **Open Source**: Free to use, modify, and distribute
+- **Copyleft**: Modified versions must be shared under same license
+- **File-Level**: Only modified files must be open-sourced
+- **Commercial Use**: Permitted with proper attribution
+
+## 🆘 Support
+
+### Resources
+
+- **Documentation**: This README
+- **Issue Tracker**: [GitHub Issues](link-to-issues)
+- **Email**: support@domain.com (update with actual contact)
+
+### Before Requesting Support
+
+1. Check this README thoroughly
+2. Review logs for specific errors
+3. Search existing issues
+4. Prepare environment details:
+   - OS version
+   - Docker version
+   - Docker Compose version
+   - Relevant configuration (sanitized)
+
+### Reporting Issues
+
+**Good Issue Report Template**:
+
+```markdown
+**Environment**
+- OS: Ubuntu 22.04
+- Docker: 24.0.5
+- Docker Compose: 2.20.0
+
+**Expected Behavior**
+Label Studio should load in iframe
+
+**Actual Behavior**
+Blank iframe with CSP errors in console
+
+**Steps to Reproduce**
+1. Navigate to https://192.168.1.100/
+2. Click "Label Studio" in menu
+3. Observe blank iframe
+
+**Logs**
 ```
-Mozilla Public License Version 2.0
-==================================
-
-This Source Code Form is subject to the terms of the Mozilla Public
-License, v. 2.0. If a copy of the MPL was not distributed with this
-file, You can obtain one at http://mozilla.org/MPL/2.0/.
+[paste relevant logs here]
 ```
 
-## 👨‍💻 Contact & Responsibility
-
-**Technical Contact & Project Maintainer:**
-- **Alexander Fugmann** - alexander.fugmann@wago.com
-- Senior Software Engineer, WAGO GmbH & Co. KG
-
-**General Support & IoT Inquiries:**
-- **IoT Team** - iot@wago.com
-- WAGO Industrial IoT Solutions
-
-## 🙏 Acknowledgments
-
-- **WAGO GmbH & Co. KG** - Industrial automation expertise
-- **Label Studio** - Data annotation platform
-- **n8n** - Workflow automation
-- **Grafana** - Visualization and monitoring
-- **React** - Frontend framework
-- **Docker** - Containerization platform
-
-## 📞 Support
-
-- **Primary Contact**: alexander.fugmann@wago.com (Technical Lead)
-- **IoT Support**: iot@wago.com (General IoT inquiries)
-- **Documentation**: [GitHub Wiki](https://github.com/WagoAlex/wago-ai-suite/wiki)
-- **Issues**: [GitHub Issues](https://github.com/WagoAlex/wago-ai-suite/issues)
-- **WAGO App Analytics**: [Download Center](https://downloadcenter.wago.com/wago/solution/details/m7d6fq3g6kbg604hre4)
-- **Community**: [WAGO Community Forum](https://www.wago.community/)
+**Configuration**
+SERVER_NAME=192.168.1.100
+(other relevant config)
+```
+```
 
 ---
 
-**Made with ❤️ by WAGO for the Industrial AI Community**
+## 📚 Additional Documentation
+
+### API Documentation
+
+See [API.md](API.md) for backend API reference (if available)
+
+### Architecture Diagrams
+
+See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation (if available)
+
+### Deployment Guides
+
+- [AWS Deployment](docs/aws-deployment.md)
+- [Azure Deployment](docs/azure-deployment.md)
+- [On-Premise Deployment](docs/on-premise-deployment.md)
+
+*(Create these as needed)*
+
+---
+
+**Built with ❤️ for Edge AI Applications**
+
+*Version 1.7 - Last Updated: 2024*
