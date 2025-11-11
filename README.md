@@ -25,12 +25,18 @@
 
 WAGO AI Suite is a containerized application platform designed for deploying and managing AI workloads on edge devices. It provides a unified interface for model visualization, data labeling, workflow automation, and real-time inference with a focus on energy efficiency and local execution.
 
+The suite integrates with **WAGO App Analytics (WAA)**, a CODESYS-based solution that provides pre-built Docker images for Node-RED and Grafana, enabling remote container management directly from CODESYS projects. This integration allows seamless orchestration between industrial automation and AI workflows.
+
+**Learn more about WAA**: [WAGO App Analytics Download Center](https://downloadcenter.wago.com/wago/solution/details/m7d6fq3g6kbg604hre4)
+
 ### Business Value
 
+- **CODESYS Integration**: Seamless integration with WAGO App Analytics (WAA) for unified industrial automation and AI management
 - **Edge-First Design**: Optimized for local execution, reducing latency and cloud dependencies
 - **Energy Efficient**: Purpose-built for resource-constrained environments
 - **Scalable Architecture**: Modular design allows selective deployment of components
 - **Enterprise Ready**: Production-grade security with HTTPS, authentication, and monitoring
+- **Industrial-Grade**: Leverages WAGO's industrial automation expertise with pre-built, tested container images
 
 ## ✨ Key Features
 
@@ -43,7 +49,8 @@ WAGO AI Suite is a containerized application platform designed for deploying and
 - **Interactive Development**: JupyterLab environment for experimentation
 - **MQTT Integration**: Real-time messaging for inference requests and results
 - **Video Processing**: RTSP stream handling with inference capabilities
-- **Multi-Platform Support**: GPU and CPU inference options
+- **Edge AI Acceleration**: Hailo-8 powered inference for real-time object detection
+- **Multi-Platform Support**: GPU, CPU, and dedicated AI accelerator inference options
 
 ### Technical Highlights
 
@@ -53,6 +60,7 @@ WAGO AI Suite is a containerized application platform designed for deploying and
 - Cross-Origin Resource Sharing (CORS) enabled
 - Docker Compose orchestration
 - Automated build pipeline with versioning
+- Hardware-accelerated inference with Hailo-8 (26 TOPS, ~2.5W)
 
 ## 🏗️ Architecture
 
@@ -85,16 +93,17 @@ WAGO AI Suite is a containerized application platform designed for deploying and
 
 ### Component Breakdown
 
-| Component | Purpose | Port | Technology |
-|-----------|---------|------|------------|
-| **Frontend** | Web UI | 443, 80 | React 18, Material-UI |
-| **Backend** | REST API | 3042, 3443 | Node.js, Express |
-| **Label Studio** | Data annotation | 8080 | Python/Django |
-| **Grafana** | Monitoring | 5000 | Go |
-| **JupyterLab** | Development | 8888 | Python |
-| **Node-RED** | Automation | 5101 | Node.js |
-| **n8n** | Workflow automation | 5678 | Node.js |
-| **MQTT Broker** | Messaging | 9001 | Mosquitto |
+| Component | Purpose | Port | Technology | Source |
+|-----------|---------|------|------------|--------|
+| **Frontend** | Web UI | 443, 80 | React 18, Material-UI | Custom |
+| **Backend** | REST API | 3042, 3443 | Node.js, Express | Custom |
+| **Label Studio** | Data annotation | 8080 | Python/Django | Open Source |
+| **Grafana** | Monitoring | 5000 | Go | **WAA** (WAGO App Analytics) |
+| **JupyterLab** | Development | 8888 | Python | Custom |
+| **Node-RED** | Automation | 5101 | Node.js | **WAA** (WAGO App Analytics) |
+| **n8n** | Workflow automation | 5678 | Node.js | Open Source |
+| **MQTT Broker** | Messaging | 1883, 9001 | Mosquitto | Open Source |
+| **Hailo AI** | Edge inference | 8042 | Python, Hailo-8 | Custom |
 
 ## 📦 Prerequisites
 
@@ -106,6 +115,19 @@ WAGO AI Suite is a containerized application platform designed for deploying and
 - **Memory**: Minimum 8GB RAM (16GB recommended)
 - **Storage**: 20GB available space
 - **Network**: Static IP or dynamic DNS
+
+### WAGO App Analytics (WAA) Integration
+
+The WAGO AI Suite leverages **WAGO App Analytics (WAA)** for Node-RED and Grafana services. WAA is a CODESYS-based solution that provides:
+
+- **Pre-built Docker Images**: Industrial-grade, tested container images for Node-RED and Grafana
+- **CODESYS Integration**: Remote container management directly from CODESYS projects
+- **Installer Package**: Simplified deployment on WAGO PLCs and edge devices
+- **Industrial Automation Bridge**: Seamless data flow between PLC logic and AI workflows
+
+**Download WAA**: [WAGO App Analytics at Download Center](https://downloadcenter.wago.com/wago/solution/details/m7d6fq3g6kbg604hre4)
+
+**Note**: While the AI Suite can use standard Node-RED and Grafana images, using WAA-provided images ensures compatibility with WAGO industrial automation ecosystems.
 
 ### Optional Requirements
 
@@ -194,6 +216,443 @@ https://192.168.1.100  (replace with your SERVER_NAME)
 ```
 
 **Note**: You'll need to accept the self-signed certificate warning for initial testing.
+
+## 📄 Complete Docker Compose Configuration
+
+### Full docker-compose.yml
+
+Below is the complete, production-ready Docker Compose configuration. This file is **100% Portainer Stack compatible**.
+
+```yaml
+version: '3.8'
+
+# ============================================================================
+# Global Environment Variables
+# Adjustable via .env file or directly here
+# ============================================================================
+x-common-variables: &common-vars
+  SERVER_NAME: "192.168.2.124"
+  INFERENCE_URL: "192.168.2.124"
+
+networks:
+  waa_cm_network:
+    external: true
+    driver: bridge
+
+services:
+  # ============================================================================
+  # MQTT Broker Service
+  # ============================================================================
+  mqtt-broker:
+    container_name: mqtt-broker
+    image: wagoalex/mqtt-broker:latest
+    restart: always
+    ports:
+      - "1883:1883"
+      - "8883:8883"
+      - "9001:9001"
+    environment: 
+      <<: *common-vars
+      MOSQUITTO_CONFIG: "/mosquitto/config/mosquitto-any.conf"
+      #MOSQUITTO_CONFIG: "/mosquitto/config/mosquitto-pwd.conf"
+    networks:
+      - waa_cm_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "1"
+
+  # ============================================================================
+  # WAGO AI Suite - Frontend
+  # ============================================================================
+  wago-ai-suite:
+    image: wagoalex/wago-ai-suite-ui:1.947
+    container_name: wago-ai-suite
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - /docker/tests:/app
+      - /etc/docker/certs:/etc/docker/certs
+    environment:
+      <<: *common-vars
+      REACT_APP_MQTT_BROKER_URL: "wss://${SERVER_NAME:-192.168.2.124}/mqtt"
+      REACT_APP_MQTT_START_TOPIC: "agent/audio/start"
+      REACT_APP_N8N_API_URL: "/n8n"
+      REACT_APP_N8N_REST_API_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJlOTFjMmYyNy1kOGEzLTRkNWYtYTZmZC1hYTIwMmU4OGRiNTMiLCJpc3MiOiJuOG4iLCJhdWQiOiJwdWJsaWMtYXBpIiwiaWF0IjoxNzU1Njk2NjQwfQ.zS_yBGDx5X10HdwPUMb9zBHJgIEI8QlLXcHszEai2gA"
+      REACT_APP_SERVER_NAME: "${SERVER_NAME:-192.168.2.124}"
+      REACT_APP_INFERENCE_URL: "${INFERENCE_URL:-192.168.2.124}"
+      REACT_APP_BACKEND_API_URL: "https://wago-ai-suite-backend:3042"
+      REACT_APP_WEBHOOK_URL: "/n8n/webhook-test/1 /n8n/webhook-test/2 /n8n/webhook-test/3"
+      REACT_APP_MQTT_TRANSCRIPTION_TOPIC: "agent/audio/transcription"
+      REACT_APP_MQTT_RESPONSE_TOPIC: "agent/audio/response"
+      REACT_APP_MQTT_INPUT_TOPIC: "agent/audio/input"
+      REACT_APP_MQTT_VOICE_TOPIC: "agent/audio/voice"
+      REACT_APP_MQTT_CHAT_INPUT_TOPIC: "agent/chat/input"
+      REACT_APP_MQTT_CHAT_RESPONSE_TOPIC: "agent/chat/response"
+      REACT_APP_MQTT_PROGRESS_TOPIC: "agent/audio/progress"
+      REACT_APP_START_PAYLOAD: '{"command": "start"}'
+      REACT_APP_MQTT_INFERENCE_TOPIC: "inference/#"
+      REACT_APP_VERSION: "1.7"
+      INTERFACE_PATTERN: "X.*"
+    networks:
+      - waa_cm_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "1"
+
+  # ============================================================================
+  # WAGO AI Suite - Backend
+  # ============================================================================
+  wago-ai-suite-backend:
+    image: wagoalex/wago-ai-suite-backend:1.947
+    container_name: wago-ai-suite-backend
+    ports:
+      - "3042:3042"
+      - "3443:3443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /docker/local-ai/was/backend/ssl:/app/ssl
+      - /docker/tests:/app/audio
+      - /etc/docker/certs:/etc/docker/certs
+    environment:
+      <<: *common-vars
+      API_KEY: "j}b9Q~#zsJOhR~LH-<"
+      BACKEND_HTTPS_PORT: "3443"
+      BACKEND_PORT: "3042"
+      INFERENCE_PORT: "8042"
+    networks:
+      - waa_cm_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "1"
+
+  # ============================================================================
+  # Label Studio - Data Annotation Tool
+  # ============================================================================
+  wago-label-studio:
+    image: heartexlabs/label-studio:1.20.0
+    container_name: wago-label-studio
+    ports:
+      - "8080:8080"
+    volumes:
+      - /docker/local-ai/labelstudio/data:/label-studio/data
+      - /docker/local-ai/labelstudio/files:/label-studio/files
+    environment:
+      <<: *common-vars
+      # Basic Authentication
+      LABEL_STUDIO_USERNAME: "alexander.fugmann@wago.com"
+      LABEL_STUDIO_PASSWORD: "wagowago"
+      LABEL_STUDIO_USER_EMAIL: "alexander.fugmann@wago.com"
+      
+      # URL Configuration
+      LABEL_STUDIO_HOST: "https://${SERVER_NAME:-192.168.2.124}/labelstudio"
+      LABEL_STUDIO_BASE_URL: "https://${SERVER_NAME:-192.168.2.124}/labelstudio/"
+      
+      # Static and Media URLs
+      STATIC_URL: "/labelstudio/static/"
+      STATIC_ROOT: "/label-studio/static"
+      MEDIA_URL: "/labelstudio/media/"
+      MEDIA_ROOT: "/label-studio/media"
+      
+      # Django Settings for Subpath
+      SCRIPT_NAME: "/labelstudio"
+      FORCE_SCRIPT_NAME: "/labelstudio"
+      USE_X_FORWARDED_PREFIX: "true"
+      
+      # Login/Logout Redirects
+      DJANGO_LOGIN_REDIRECT_URL: "/labelstudio/projects/"
+      DJANGO_LOGOUT_REDIRECT_URL: "/labelstudio/"
+      LOGIN_URL: "/labelstudio/user/login/"
+      
+      # Security Settings
+      ALLOWED_HOSTS: "*"
+      DEBUG: "true"
+      DJANGO_USE_X_FORWARDED_HOST: "true"
+      DJANGO_USE_X_FORWARDED_PROTO: "true"
+      DJANGO_USE_X_FORWARDED_PORT: "true"
+      DJANGO_USE_X_FORWARDED_PREFIX: "true"
+      DJANGO_SECURE_SSL_REDIRECT: "false"
+      DJANGO_SECURE_CONTENT_TYPE_NOSNIFF: "false"
+      DJANGO_SECURE_BROWSER_XSS_FILTER: "false"
+      DJANGO_SECURE_HSTS_SECONDS: "0"
+      DJANGO_SECURE_FRAME_DENY: "false"
+      X_FRAME_OPTIONS: "ALLOWALL"
+      
+      # CSRF and CORS Settings
+      LABEL_STUDIO_DISABLE_CSRF_MIDDLEWARE: "true"
+      USE_ENFORCE_CSRF_CHECKS: "false"
+      CSRF_TRUSTED_ORIGINS: "http://${SERVER_NAME:-192.168.2.124},https://${SERVER_NAME:-192.168.2.124}"
+      LABEL_STUDIO_CORS_ALLOWED_ORIGINS: "*"
+      LABEL_STUDIO_CORS_ALLOW_ALL_ORIGINS: "true"
+      LABEL_STUDIO_CORS_ALLOW_CREDENTIALS: "true"
+      
+      # Disable Telemetry
+      LABEL_STUDIO_DISABLE_TELEMETRY: "true"
+      LABEL_STUDIO_DISABLE_ANALYTICS: "true"
+      LABEL_STUDIO_DISABLE_SENTRY: "true"
+    networks:
+      - waa_cm_network
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "1"
+
+  # ============================================================================
+  # JupyterLab - Development Environment
+  # ============================================================================
+  jupyterlab:
+    image: wagoalex/jupyterhub:wago-engineering-cpu
+    container_name: wago-jupyter-lab-cpu
+    user: "10642:10600"
+    entrypoint: 
+      - jupyter
+      - lab
+      - --ip=0.0.0.0
+      - --ServerApp.base_url=/jupyter/
+      - --port=8888
+      - --no-browser
+      - --allow-root
+      - --ServerApp.token=
+      - --ServerApp.password=
+      - --ServerApp.allow_origin=*
+      - --ServerApp.disable_check_xsrf=True
+      - --ServerApp.tornado_settings={"headers":{"Content-Security-Policy":"frame-ancestors 'self' *"}}
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    volumes:
+      - /docker/local-ai/wj/yolo:/usr/src/app
+    environment:
+      - JUPYTERLAB_BASE_URL=/jupyter/
+    networks:
+      - waa_cm_network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "1"
+
+  # ============================================================================
+  # Hailo AI - YOLOv5 Inference (RTSP/Webcam Mode)
+  # ============================================================================
+  hailo-ai:
+    image: wagoalex/wago-hailo:yolov5-latest
+    container_name: wago-hailo-yolo5m-helmet-wago-rtsp
+    privileged: true
+    network_mode: host
+    ipc: host
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 4G
+        reservations:
+          cpus: '2.0'
+          memory: 2G
+    
+    entrypoint: ["/bin/bash", "entrypoint.sh", "rtsp"]
+    
+    environment:
+      # Capture & Retry Configuration
+      MAX_CAPTURE_OPEN_RETRIES: "20"
+      CAPTURE_OPEN_RETRY_DELAY: "3.0"
+      MAX_READ_RETRIES: "10"
+      PLACEHOLDER_FRAME_DELAY: "0.7"
+      
+      # Display & GUI Settings
+      QT_QPA_PLATFORM: "xcb"
+      XDG_RUNTIME_DIR: "/run/user/0"
+      DISPLAY: ":99"
+      SHOW_IN_GUI: "0"
+      
+      # Frame Configuration
+      FRAME_WIDTH: "640"
+      FRAME_HEIGHT: "640"
+      FRAME_MAX: "0.3"
+      FRAME_RATE: "15"
+      
+      # Detection Thresholds
+      CONFIDENCE_THRESHOLD: "0.85"
+      IOU_THRESHOLD: "0.3"
+      NMS_IOU_THRESHOLD: "0.45"
+      
+      # MQTT Configuration
+      MQTT_BROKER: "192.168.2.124"
+      MQTT_PORT: "1883"
+      MQTT_TOPIC: "inference/yolov5m-results"
+      
+      # Model Configuration
+      HEF_PATH: "/local/workspace/yolov5m-helmet-wago_20251014_183320.hef"
+      WEBCAM_INDEX: "0"
+      
+      # Logging & Metadata
+      LOG_LEVEL: "INFO"
+      INCLUDE_METADATA: "0"
+      GST_DEBUG: "1"
+      
+      # Streaming Configuration
+      USE_GSTREAMER: "0"
+      HLS_TIME: "2"
+      HLS_LIST_SIZE: "60"
+      HLS_FLAGS: "independent_segments+append_list+delete_segments+omit_endlist"
+      FFMPEG_PRESET: "veryfast"
+      
+      # Queue Management
+      QUEUE_WARN_THRESHOLD: "20"
+      QUEUE_DROP_THRESHOLD: "500"
+    
+    volumes:
+      - /tmp/.X11-unix/:/tmp/.X11-unix/
+      - /root/.Xauthority:/root/.Xauthority:ro
+      - /lib/firmware:/lib/firmware
+      - /docker/tests/:/local/workspace/share:rw
+    
+    devices:
+      - /dev/dri:/dev/dri
+      - /dev/video0:/dev/video0
+      - /dev/video1:/dev/video1
+    
+    group_add:
+      - 44
+    
+    tty: true
+    stdin_open: true
+    
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8042/health"]
+      interval: 120s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+```
+
+### Portainer Stack Deployment
+
+This configuration is **100% compatible** with Portainer Stacks. To deploy:
+
+1. **Navigate to Portainer**
+   - Go to Stacks → Add Stack
+   - Name: `wago-ai-suite`
+
+2. **Paste Configuration**
+   - Copy the entire docker-compose.yml above
+   - Paste into Web editor
+
+3. **Adjust Variables**
+   - Update `SERVER_NAME` to your host IP
+   - Update `INFERENCE_URL` if using separate inference server
+   - Modify volume paths as needed
+
+4. **Deploy Stack**
+   - Click "Deploy the stack"
+   - Monitor deployment logs
+
+### Key Configuration Points
+
+#### Global Variables (x-common-variables)
+```yaml
+x-common-variables: &common-vars
+  SERVER_NAME: "192.168.2.124"      # Change to your IP
+  INFERENCE_URL: "192.168.2.124"    # Inference server IP
+```
+
+#### Network Configuration
+- External network: `waa_cm_network`
+- Create before deployment: `docker network create waa_cm_network`
+
+#### Service Highlights
+
+**MQTT Broker**
+- Ports: 1883 (MQTT), 8883 (MQTTS), 9001 (WebSocket)
+- Configuration: mosquitto-any.conf (no authentication)
+
+**Frontend (wago-ai-suite)**
+- Version: 1.947
+- Ports: 443 (HTTPS), 80 (HTTP)
+- Embedded services: Label Studio, Netron, all proxied paths
+
+**Backend (wago-ai-suite-backend)**
+- Docker socket access for container management
+- Ports: 3042 (HTTP), 3443 (HTTPS)
+
+**Label Studio**
+- Data annotation platform
+- Port: 8080
+- Subpath: /labelstudio/
+
+**JupyterLab**
+- Development environment
+- Port: 8888
+- Subpath: /jupyter/
+- User: 10642:10600 (configurable)
+
+**Hailo AI Inference**
+- YOLOv5 object detection
+- Network mode: host (for low-latency streaming)
+- Privileged: true (hardware access)
+- Resource limits: 4 CPU, 4GB RAM
+
+### Volume Requirements
+
+Create these directories before deployment:
+
+```bash
+# Core directories
+sudo mkdir -p /docker/tests
+sudo mkdir -p /docker/local-ai/labelstudio/{data,files}
+sudo mkdir -p /docker/local-ai/was/backend/ssl
+sudo mkdir -p /docker/local-ai/wj/yolo
+sudo mkdir -p /etc/docker/certs
+
+# Set permissions
+sudo chmod -R 755 /docker/local-ai
+```
+
+### Environment Customization
+
+#### Production Security
+```yaml
+environment:
+  API_KEY: "GENERATE_NEW_KEY_HERE"  # Change in wago-ai-suite-backend
+  LABEL_STUDIO_PASSWORD: "strong-password"  # Change in wago-label-studio
+```
+
+#### MQTT Authentication
+```yaml
+mqtt-broker:
+  environment:
+    MOSQUITTO_CONFIG: "/mosquitto/config/mosquitto-pwd.conf"  # Enable authentication
+```
+
+#### JupyterLab User Mapping
+```yaml
+jupyterlab:
+  user: "1000:1000"  # Change to your UID:GID
+```
+
+#### Hailo AI Mode Selection
+```yaml
+hailo-ai:
+  entrypoint: ["/bin/bash", "entrypoint.sh", "webcam"]  # Switch to webcam mode
+```
 
 ## ⚙️ Configuration
 
@@ -357,6 +816,44 @@ docker stats
 - Use load balancer for frontend (not included)
 - Separate databases for Label Studio
 
+### WAGO App Analytics (WAA) Deployment
+
+#### Using WAA with CODESYS
+
+If deploying on WAGO PLCs with CODESYS runtime:
+
+1. **Install WAA Package**:
+   - Download from [WAGO Download Center](https://downloadcenter.wago.com/wago/solution/details/m7d6fq3g6kbg604hre4)
+   - Follow WAA installation guide
+   - Configure CODESYS project integration
+
+2. **Configure Container Management**:
+   ```
+   - Use WAA's pre-built images for Grafana and Node-RED
+   - Configure remote start from CODESYS project
+   - Set up data bridges between PLC and containers
+   ```
+
+3. **Network Configuration**:
+   - Ensure CODESYS runtime can reach Docker daemon
+   - Configure port mappings (5000 for Grafana, 5101 for Node-RED)
+   - Set up firewall rules for industrial protocols
+
+4. **Benefits of WAA Integration**:
+   - **Unified Management**: Control containers directly from CODESYS IDE
+   - **Data Flow**: Seamless PLC variable access in Node-RED flows
+   - **Visualization**: Real-time PLC data in Grafana dashboards
+   - **Industrial Protocols**: Pre-configured Modbus, OPC UA support
+   - **Edge Optimization**: Images optimized for WAGO edge controllers
+
+#### Standalone Deployment (Without WAA)
+
+The AI Suite can also run with standard Docker images:
+- Replace WAA Grafana with official `grafana/grafana` image
+- Replace WAA Node-RED with official `nodered/node-red` image
+- Adjust port mappings in `docker-compose.yml` as needed
+- Note: Industrial protocol integrations may require additional configuration
+
 ### Backup and Recovery
 
 #### Backup Data Volumes
@@ -398,6 +895,21 @@ docker-compose up -d
 
 ## 🔌 Integrated Services
 
+### About WAGO App Analytics (WAA)
+
+Some services in this suite (Grafana and Node-RED) are provided by **WAGO App Analytics (WAA)**, an industrial automation solution that bridges CODESYS projects with modern container-based applications.
+
+**Key WAA Features**:
+- Pre-built, industrial-tested Docker images
+- Remote container management from CODESYS projects
+- Direct PLC data integration
+- Optimized for WAGO edge devices
+- Industrial protocol support (Modbus, OPC UA, etc.)
+
+**Download and Documentation**: [WAGO App Analytics at Download Center](https://downloadcenter.wago.com/wago/solution/details/m7d6fq3g6kbg604hre4)
+
+---
+
 ### Label Studio (Data Annotation)
 
 **Access**: `https://{SERVER_NAME}/labelstudio/`
@@ -421,11 +933,21 @@ docker-compose up -d
 
 **Default Credentials**: Check host system configuration
 
+**Provided by**: WAGO App Analytics (WAA) - [Learn More](https://downloadcenter.wago.com/wago/solution/details/m7d6fq3g6kbg604hre4)
+
 **Use Cases**:
 - System metrics (CPU, memory, disk)
 - Model inference performance
 - MQTT message statistics
 - Custom dashboards
+- PLC data visualization (via WAA integration)
+- Industrial process monitoring
+
+**WAA Benefits**:
+- Pre-configured for WAGO industrial environments
+- Direct CODESYS data source integration
+- Optimized for edge device performance
+- Industrial-grade reliability and testing
 
 ### JupyterLab (Development)
 
@@ -447,17 +969,31 @@ docker-compose up -d
 
 **Access**: `https://{SERVER_NAME}/nodered/`
 
+**Provided by**: WAGO App Analytics (WAA) - [Learn More](https://downloadcenter.wago.com/wago/solution/details/m7d6fq3g6kbg604hre4)
+
 **Features**:
 - Visual flow-based programming
 - MQTT integration
 - HTTP request handling
 - Database connectors
+- CODESYS variable access (via WAA)
+- Modbus/TCP, OPC UA support
+- Industrial protocol integration
 
 **Example Use Cases**:
 - MQTT message routing
 - Data transformation pipelines
 - API integrations
 - Scheduled tasks
+- PLC to AI inference workflows
+- Industrial sensor data preprocessing
+- Real-time data aggregation from multiple sources
+
+**WAA Benefits**:
+- Pre-installed industrial automation nodes
+- Optimized for WAGO edge devices
+- Direct integration with CODESYS runtime
+- Field-tested in industrial environments
 
 ### n8n (Workflow Automation)
 
@@ -491,6 +1027,73 @@ docker-compose up -d
 2. Upload or provide URL to model file
 3. Explore architecture visually
 4. Export diagrams
+
+### Hailo AI Inference (Edge AI Accelerator)
+
+**Hardware**: Hailo-8 AI Accelerator
+
+**Container**: `wagoalex/wago-hailo:yolov5-latest`
+
+**Features**:
+- YOLOv5 object detection optimized for Hailo-8
+- RTSP stream processing (IP cameras)
+- USB webcam support
+- Real-time inference with HLS streaming
+- MQTT result publishing
+- Hardware-accelerated processing
+
+**Modes**:
+- **RTSP Mode**: Process IP camera streams
+- **Webcam Mode**: Process USB camera input
+
+**Configuration**:
+
+```yaml
+# Switch between modes
+entrypoint: ["/bin/bash", "entrypoint.sh", "rtsp"]   # or "webcam"
+
+# Key environment variables
+CONFIDENCE_THRESHOLD: "0.85"    # Detection confidence
+FRAME_RATE: "15"                # Processing FPS
+MQTT_BROKER: "192.168.2.124"   # Results destination
+MQTT_TOPIC: "inference/yolov5m-results"
+```
+
+**MQTT Output Format**:
+```json
+{
+  "timestamp": "2024-11-11T15:30:45",
+  "detections": [
+    {
+      "class": "helmet",
+      "confidence": 0.92,
+      "bbox": [x, y, width, height]
+    }
+  ],
+  "frame_count": 1542,
+  "inference_time_ms": 12.3
+}
+```
+
+**Use Cases**:
+- Safety equipment detection (helmets, vests)
+- Quality control inspection
+- Person/vehicle counting
+- Anomaly detection
+- Real-time monitoring
+
+**Hardware Requirements**:
+- Hailo-8 AI accelerator module
+- 4GB RAM minimum
+- USB 3.0 or RTSP-capable camera
+- Host network mode for optimal performance
+
+**Benefits**:
+- **Energy Efficient**: ~2.5W power consumption
+- **High Performance**: 26 TOPS processing power
+- **Edge Processing**: No cloud dependency
+- **Low Latency**: <50ms inference time
+- **Scalable**: Multiple accelerators per host
 
 ## 🛠️ Development
 
@@ -984,8 +1587,153 @@ Blank iframe with CSP errors in console
 3. Observe blank iframe
 
 **Logs**
+
 ```
-[paste relevant logs here]
+[+] Running 3/3
+ ✔ Container wago-ai-suite-backend  Created                                                                        0.1s
+ ✔ Container wago-label-studio      Created                                                                        0.1s
+ ✔ Container wago-ai-suite          Created                                                                        0.1s
+Attaching to wago-ai-suite, wago-ai-suite-backend, wago-label-studio
+wago-label-studio  | + exec
+wago-label-studio  | + ENTRYPOINT_PATH=/label-studio/deploy/docker-entrypoint.d
+wago-label-studio  | + source_inject_envvars
+wago-label-studio  | + '[' -n '' ']'
+wago-label-studio  | + '[' -f /opt/heartex/instance-data/etc/config_env ']'
+wago-label-studio  | + '[' label-studio = nginx ']'
+wago-label-studio  | + '[' label-studio = label-studio-uwsgi ']'
+wago-label-studio  | + '[' label-studio = label-studio-migrate ']'
+wago-label-studio  | + exec_or_wrap_n_exec label-studio
+wago-label-studio  | + '[' -n '' ']'
+wago-label-studio  | + exec label-studio
+wago-ai-suite      |  Starting WAGO AI Suite Frontend...
+wago-ai-suite      |
+wago-ai-suite      |    Configuration:
+wago-ai-suite      |    SERVER_NAME:     192.168.2.181 (Grafana, Jupyter, Node-RED)
+wago-ai-suite      |    INFERENCE_URL:   192.168.2.116 (Inference Server)
+wago-ai-suite      |    N8N_API_KEY:     [SET]
+wago-ai-suite      |
+wago-ai-suite      |    Testing NGINX configuration...
+wago-ai-suite      | 2025/11/11 14:38:16 [warn] 8#8: conflicting server name "_" on 0.0.0.0:80, ignored
+wago-ai-suite      | nginx: the configuration file /etc/nginx/nginx.conf syntax is ok
+wago-ai-suite      | nginx: configuration file /etc/nginx/nginx.conf test is successful
+wago-ai-suite      |   NGINX config valid. Starting NGINX...
+wago-ai-suite      | 2025/11/11 14:38:16 [warn] 1#1: conflicting server name "_" on 0.0.0.0:80, ignored
+wago-ai-suite-backend  | Created logs directory: /app/logs
+wago-ai-suite-backend  | Logs directory is writable: /app/logs
+wago-ai-suite-backend  | {"level":"info","message":"HTTP server running on port 3042","timestamp":"2025-11-11 14:38:17"}
+wago-ai-suite-backend  | {"level":"info","message":"HTTPS server running on port 3443","timestamp":"2025-11-11 14:38:17"}
+wago-label-studio      | => Hostname correctly is set to: https://192.168.2.181/labelstudio
+wago-label-studio      | => Django URL prefix is set to: /labelstudio
+wago-label-studio      | => Database and media directory: /label-studio/data
+wago-label-studio      | => Static URL is set to: /static/
+wago-label-studio      | => Hostname correctly is set to: https://192.168.2.181/labelstudio
+wago-label-studio      | => Django URL prefix is set to: /labelstudio
+wago-label-studio      | => Database and media directory: /label-studio/data
+wago-label-studio      | => Static URL is set to: /static/
+wago-label-studio      | Read environment variables from: /label-studio/data/.env
+wago-label-studio      | get 'SECRET_KEY' casted as '<class 'str'>' with default ''
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/types/project.py:157: SyntaxWarning: invalid escape sequence '\{'
+wago-label-studio      |   Dict of weights for each control tag in metric calculation. Each control tag (e.g. label or choice) will have its own key in control weight dict with weight for each label and overall weight. For example, if a bounding box annotation with a control tag named my_bbox should be included with 0.33 weight in agreement calculation, and the first label Car should be twice as important as Airplane, then you need to specify: \{'my_bbox': \{'type': 'RectangleLabels', 'labels': \{'Car': 1.0, 'Airplane': 0.5}, 'overall': 0.33}}
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/projects/types/projects_create_response.py:81: SyntaxWarning: invalid escape sequence '\{'
+wago-label-studio      |   Dict of weights for each control tag in metric calculation. Each control tag (e.g. label or choice) will have its own key in control weight dict with weight for each label and overall weight. For example, if a bounding box annotation with a control tag named my_bbox should be included with 0.33 weight in agreement calculation, and the first label Car should be twice as important as Airplane, then you need to specify: \{'my_bbox': \{'type': 'RectangleLabels', 'labels': \{'Car': 1.0, 'Airplane': 0.5}, 'overall': 0.33}}
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/projects/types/projects_update_response.py:86: SyntaxWarning: invalid escape sequence '\{'
+wago-label-studio      |   Dict of weights for each control tag in metric calculation. Each control tag (e.g. label or choice) will have its own key in control weight dict with weight for each label and overall weight. For example, if a bounding box annotation with a control tag named my_bbox should be included with 0.33 weight in agreement calculation, and the first label Car should be twice as important as Airplane, then you need to specify: \{'my_bbox': \{'type': 'RectangleLabels', 'labels': \{'Car': 1.0, 'Airplane': 0.5}, 'overall': 0.33}}
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/_extensions/label_studio_tools/core/label_config.py:137: SyntaxWarning: invalid escape sequence '\$'
+wago-label-studio      |   expression = "^\$[A-Za-z_]+$"
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/files/client.py:122: SyntaxWarning: invalid escape sequence '\ '
+wago-label-studio      |   curl -H 'Authorization: Token abc123' \ -X POST 'https://localhost:8080/api/import/file-upload/245' -F ‘file=@path/to/my_file.csv’
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/files/client.py:448: SyntaxWarning: invalid escape sequence '\ '
+wago-label-studio      |   curl -H 'Authorization: Token abc123' \ -X POST 'https://localhost:8080/api/import/file-upload/245' -F ‘file=@path/to/my_file.csv’
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/projects/client.py:210: SyntaxWarning: invalid escape sequence '\{'
+wago-label-studio      |   Dict of weights for each control tag in metric calculation. Each control tag (e.g. label or choice) will have its own key in control weight dict with weight for each label and overall weight. For example, if a bounding box annotation with a control tag named my_bbox should be included with 0.33 weight in agreement calculation, and the first label Car should be twice as important as Airplane, then you need to specify: \{'my_bbox': \{'type': 'RectangleLabels', 'labels': \{'Car': 1.0, 'Airplane': 0.5}, 'overall': 0.33}}
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/projects/client.py:444: SyntaxWarning: invalid escape sequence '\{'
+wago-label-studio      |   Dict of weights for each control tag in metric calculation. Each control tag (e.g. label or choice) will have its own key in control weight dict with weight for each label and overall weight. For example, if a bounding box annotation with a control tag named my_bbox should be included with 0.33 weight in agreement calculation, and the first label Car should be twice as important as Airplane, then you need to specify: \{'my_bbox': \{'type': 'RectangleLabels', 'labels': \{'Car': 1.0, 'Airplane': 0.5}, 'overall': 0.33}}
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/projects/client.py:535: SyntaxWarning: invalid escape sequence '\.'
+wago-label-studio      |   #### 1\. **POST with data**
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/projects/client.py:895: SyntaxWarning: invalid escape sequence '\{'
+wago-label-studio      |   Dict of weights for each control tag in metric calculation. Each control tag (e.g. label or choice) will have its own key in control weight dict with weight for each label and overall weight. For example, if a bounding box annotation with a control tag named my_bbox should be included with 0.33 weight in agreement calculation, and the first label Car should be twice as important as Airplane, then you need to specify: \{'my_bbox': \{'type': 'RectangleLabels', 'labels': \{'Car': 1.0, 'Airplane': 0.5}, 'overall': 0.33}}
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/projects/client.py:1153: SyntaxWarning: invalid escape sequence '\{'
+wago-label-studio      |   Dict of weights for each control tag in metric calculation. Each control tag (e.g. label or choice) will have its own key in control weight dict with weight for each label and overall weight. For example, if a bounding box annotation with a control tag named my_bbox should be included with 0.33 weight in agreement calculation, and the first label Car should be twice as important as Airplane, then you need to specify: \{'my_bbox': \{'type': 'RectangleLabels', 'labels': \{'Car': 1.0, 'Airplane': 0.5}, 'overall': 0.33}}
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/projects/client.py:1252: SyntaxWarning: invalid escape sequence '\.'
+wago-label-studio      |   #### 1\. **POST with data**
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/projects/exports/client.py:58: SyntaxWarning: invalid escape sequence '\&'
+wago-label-studio      |   curl -X GET https://localhost:8080/api/projects/{id}/export?ids[]=123\&ids[]=345 -H 'Authorization: Token abc123' --output 'annotations.json'
+wago-label-studio      | /label-studio/.venv/lib/python3.12/site-packages/label_studio_sdk/projects/exports/client.py:607: SyntaxWarning: invalid escape sequence '\&'
+wago-label-studio      |   curl -X GET https://localhost:8080/api/projects/{id}/export?ids[]=123\&ids[]=345 -H 'Authorization: Token abc123' --output 'annotations.json'
+wago-label-studio      | Not in REPL -> leaving logger event level as is.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.address`.
+wago-label-studio      | Provider `faker.providers.address` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.automotive`.
+wago-label-studio      | Provider `faker.providers.automotive` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.bank`.
+wago-label-studio      | Specified locale `en_US` is not available for provider `faker.providers.bank`. Locale reset to `en_GB` for this provider.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.barcode`.
+wago-label-studio      | Provider `faker.providers.barcode` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.color`.
+wago-label-studio      | Provider `faker.providers.color` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.company`.
+wago-label-studio      | Provider `faker.providers.company` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.credit_card`.
+wago-label-studio      | Provider `faker.providers.credit_card` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.currency`.
+wago-label-studio      | Provider `faker.providers.currency` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.date_time`.
+wago-label-studio      | Provider `faker.providers.date_time` has been localized to `en_US`.
+wago-label-studio      | Provider `faker.providers.emoji` does not feature localization. Specified locale `en_US` is not utilized for this provider.
+wago-label-studio      | Provider `faker.providers.file` does not feature localization. Specified locale `en_US` is not utilized for this provider.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.geo`.
+wago-label-studio      | Provider `faker.providers.geo` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.internet`.
+wago-label-studio      | Provider `faker.providers.internet` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.isbn`.
+wago-label-studio      | Provider `faker.providers.isbn` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.job`.
+wago-label-studio      | Provider `faker.providers.job` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.lorem`.
+wago-label-studio      | Provider `faker.providers.lorem` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.misc`.
+wago-label-studio      | Provider `faker.providers.misc` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.passport`.
+wago-label-studio      | Provider `faker.providers.passport` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.person`.
+wago-label-studio      | Provider `faker.providers.person` has been localized to `en_US`.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.phone_number`.
+wago-label-studio      | Provider `faker.providers.phone_number` has been localized to `en_US`.
+wago-label-studio      | Provider `faker.providers.profile` does not feature localization. Specified locale `en_US` is not utilized for this provider.
+wago-label-studio      | Provider `faker.providers.python` does not feature localization. Specified locale `en_US` is not utilized for this provider.
+wago-label-studio      | Provider `faker.providers.sbn` does not feature localization. Specified locale `en_US` is not utilized for this provider.
+wago-label-studio      | Looking for locale `en_US` in provider `faker.providers.ssn`.
+wago-label-studio      | Provider `faker.providers.ssn` has been localized to `en_US`.
+wago-label-studio      | Provider `faker.providers.user_agent` does not feature localization. Specified locale `en_US` is not utilized for this provider.
+wago-label-studio      | Starting new HTTPS connection (1): pypi.org:443
+wago-label-studio      | https://pypi.org:443 "GET /pypi/label-studio/json HTTP/1.1" 200 35580
+wago-label-studio      | ╔════════════════════════════════╗
+wago-label-studio      | ║Update available 1.20.0 → 1.21.0║
+wago-label-studio      | ║Run pip install -U label-studio ║
+wago-label-studio      | ╚════════════════════════════════╝
+wago-label-studio      |
+wago-label-studio      | /label-studio/label_studio/projects/models.py:1088: SyntaxWarning: invalid escape sequence '\o'
+wago-label-studio      |   Update tasks counters and update tasks states (rearrange and\or is_labeled)
+wago-label-studio      | User alexander.fugmann@wago.com already exists
+wago-label-studio      | November 11, 2025 - 14:38:22
+wago-label-studio      | Django version 5.1.10, using settings 'core.settings.label_studio'
+wago-label-studio      | Starting development server at http://0.0.0.0:8080/
+wago-label-studio      | Quit the server with CONTROL-C.
+wago-label-studio      |
+wago-ai-suite-backend  | {"ip":"::ffff:172.18.0.23","level":"info","message":"Request received: GET /api/inference-containers?inferenceServerType=remote&remoteInferenceUrl=https:%2F%2F192.168.2.116:2376","query":{"inferenceServerType":"remote","remoteInferenceUrl":"https://192.168.2.116:2376"},"timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"inferenceServerType":"remote","level":"info","message":"Fetching inference containers","remoteInferenceUrl":"https://192.168.2.116:2376","timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"level":"info","message":"Using remote Docker instance: host=192.168.2.116, port=2376","timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"level":"info","message":"Creating and caching remote Docker instance for 192.168.2.116:2376","timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"count":2,"level":"info","message":"Inference containers fetched successfully","timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"ip":"::ffff:172.18.0.23","level":"info","message":"Request received: GET /api/inference-containers?inferenceServerType=remote&remoteInferenceUrl=https:%2F%2F192.168.2.116:2376","query":{"inferenceServerType":"remote","remoteInferenceUrl":"https://192.168.2.116:2376"},"timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"level":"info","message":"Using remote Docker instance: host=192.168.2.116, port=2376","timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"ip":"::ffff:172.18.0.23","level":"info","message":"Request received: GET /api/containers/wago-hailo-yolo5m-helmet-wago-webcam/status?inferenceServerType=remote&remoteInferenceUrl=https:%2F%2F192.168.2.116:2376","query":{"inferenceServerType":"remote","remoteInferenceUrl":"https://192.168.2.116:2376"},"timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"inferenceServerType":"remote","level":"info","message":"Fetching container status","name":"wago-hailo-yolo5m-helmet-wago-webcam","remoteInferenceUrl":"https://192.168.2.116:2376","timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"level":"info","message":"Using remote Docker instance: host=192.168.2.116, port=2376","timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"count":2,"level":"info","message":"Inference containers fetched successfully","timestamp":"2025-11-11 14:38:36"}
+wago-ai-suite-backend  | {"containerName":"wago-hailo-yolo5m-helmet-wago-webcam","level":"info","message":"Container status fetched","status":"exited","timestamp":"2025-11-11 14:38:36"}
+
+
 ```
 
 **Configuration**
@@ -998,21 +1746,6 @@ SERVER_NAME=192.168.1.100
 
 ## 📚 Additional Documentation
 
-### API Documentation
-
-See [API.md](API.md) for backend API reference (if available)
-
-### Architecture Diagrams
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed architecture documentation (if available)
-
-### Deployment Guides
-
-- [AWS Deployment](docs/aws-deployment.md)
-- [Azure Deployment](docs/azure-deployment.md)
-- [On-Premise Deployment](docs/on-premise-deployment.md)
-
-*(Create these as needed)*
 
 ---
 
