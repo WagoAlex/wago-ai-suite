@@ -1841,7 +1841,7 @@ Detection results are published in real-time:
       "label": "Safety Helmet Detected"
     },
     {
-      "class": "no-helmet", 
+      "class": "head", 
       "confidence": 0.88,
       "bbox": [450, 100, 550, 220],
       "label": "No Helmet - Safety Violation"
@@ -1863,7 +1863,7 @@ Topic: inference/yolov5m-results
 // Function Node (Process detections)
 if (msg.payload.violations > 0) {
     // Extract violation details
-    const violations = msg.payload.detections.filter(d => d.class === "no-helmet");
+    const violations = msg.payload.detections.filter(d => d.class === "head");
     
     // Create alert message
     msg.alert = {
@@ -1884,7 +1884,7 @@ if (msg.payload.violations > 0) {
 Pre-configured dashboard queries for helmet detection monitoring:
 
 - **Real-time Detection Rate**: Detections per minute
-- **Compliance Percentage**: Helmet vs. no-helmet ratio
+- **Compliance Percentage**: Helmet vs. head ratio
 - **Violation Heatmap**: Time-based violation patterns
 - **Camera Performance**: FPS, latency, detection accuracy per camera
 
