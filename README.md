@@ -1588,7 +1588,7 @@ Blank iframe with CSP errors in console
 
 **Logs**
 
-```
+``` bash
 [+] Running 3/3
  ✔ Container wago-ai-suite-backend  Created                                                                        0.1s
  ✔ Container wago-label-studio      Created                                                                        0.1s
