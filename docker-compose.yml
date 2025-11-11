@@ -1,3 +1,8 @@
+networks:
+  waa_cm_network:
+    external: true
+    driver: bridge
+    
 services:
   wago-ai-suite:
     image: wagoalex/wago-ai-suite-ui:latest
@@ -17,6 +22,7 @@ services:
       INFERENCE_URL: ${INFERENCE_URL}
     networks:
       - waa_cm_network
+  
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -41,6 +47,7 @@ services:
       BACKEND_HTTPS_PORT: ${BACKEND_HTTPS_PORT}
     networks:
       - waa_cm_network
+
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -110,6 +117,8 @@ services:
       LABEL_STUDIO_DISABLE_SENTRY: "true"
     networks:
       - waa_cm_network
+
+
     restart: unless-stopped
     logging:
       driver: "json-file"
@@ -121,7 +130,4 @@ volumes:
   wago-label-studio-data:
     driver: local
 
-networks:
-  waa_cm_network:
-    external: true
-    driver: bridge
+

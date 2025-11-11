@@ -1,6 +1,9 @@
+
 server {
     listen 80;
-    server_name $SERVER_NAME;
+    #server_name $SERVER_NAME;
+	server_name _;
+
     return 301 https://$host$request_uri; # Redirect HTTP to HTTPS
 }
 
@@ -23,6 +26,7 @@ server {
     proxy_buffer_size 64k;
     proxy_buffers 32 64k;
     proxy_busy_buffers_size 128k;
+	client_max_body_size 200M;
 
     # Normalize /api/containers/ to /api/containers
     location ~ ^/api/containers/$ {
@@ -135,15 +139,6 @@ location /labelstudio/ {
         error_log /var/log/nginx/netron-error.log debug;
     }
 
-    # ===== MAIN APPLICATION =====
-    location / {
-        root /usr/share/nginx/html;
-        try_files $uri /index.html;
-        expires 1h;
-        add_header Cache-Control "public, max-age=3600";
-        access_log /var/log/nginx/spa.log;
-        error_log /var/log/nginx/spa-error.log debug;
-    }
 
     # ===== BACKEND API =====
     location /api/ {
@@ -242,22 +237,60 @@ location /labelstudio/ {
         access_log /var/log/nginx/nodered.log;
         error_log /var/log/nginx/nodered-error.log debug;
     }
+	location /n8n/ {
+		# Basic proxy configuration 
+		proxy_pass http://n8n:5678/; 
+		
+		# Headers
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_set_header X-Forwarded-Host $host;
+		
+		# WebSocket support 
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+		
+		# Basic timeouts 
+		proxy_read_timeout 3600s;
+		proxy_send_timeout 3600s;
+		proxy_connect_timeout 60s;
+		
+		# Payload size (PROVEN)
+		client_max_body_size 50M;
+		
+		# Simple logging 
+		access_log /var/log/nginx/n8n.log;
+		error_log /var/log/nginx/n8n-error.log warn;
+	}
 
-    # ===== N8N =====
-    location /n8n/ {
-        proxy_pass http://$SERVER_NAME:5678/;
-        proxy_set_header Authorization "Bearer $REACT_APP_N8N_REST_API_KEY";
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        access_log /var/log/nginx/n8n.log;
-        error_log /var/log/nginx/n8n-error.log debug;
-    }
+	# ===== N8N WEBHOOKS (SEPARATE FOR PERFORMANCE) =====
+	location /n8n/webhook/ {
+		proxy_pass http://n8n:5678/webhook/;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_http_version 1.1;
+		proxy_set_header Upgrade $http_upgrade;
+		proxy_set_header Connection "upgrade";
+		client_max_body_size 50M;
+		proxy_read_timeout 300s;
+		access_log /var/log/nginx/n8n-webhook.log;
+	}
+
+	# ===== N8N API (SEPARATE FOR SWAGGER ACCESS) =====
+	location /n8n/api/ {
+		proxy_pass http://n8n:5678/api/;
+		proxy_set_header Host $host;
+		proxy_set_header X-Real-IP $remote_addr;
+		proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+		proxy_set_header X-Forwarded-Proto $scheme;
+		proxy_read_timeout 300s;
+		access_log /var/log/nginx/n8n-api.log;
+	}
 
     # ===== REMOTE INFERENCE =====
     location /api/remote/ {
@@ -280,4 +313,11 @@ location /labelstudio/ {
 		access_log /var/log/nginx/video.log combined;
 		error_log /var/log/nginx/video-error.log debug;
 	}
+	
+	location / {
+		root /usr/share/nginx/html;
+		try_files $uri /index.html;
+		index index.html index.htm;
+	}
+
 }

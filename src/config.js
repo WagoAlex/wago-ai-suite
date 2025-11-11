@@ -1,6 +1,10 @@
 // config.js
-export const SERVER_NAME	= process.env.REACT_APP_SERVER_NAME || 'localhost';
-export const INFERENCE_URL 	= process.env.REACT_APP_INFERENCE_URL || 'localhost';
+//export const SERVER_NAME	= process.env.REACT_APP_SERVER_NAME || 'localhost';
+//export const INFERENCE_URL 	= process.env.REACT_APP_INFERENCE_URL || 'localhost';
+
+
+export const SERVER_NAME = window.location.hostname;
+export const INFERENCE_URL = window.location.hostname;
 
 export const BACKEND_PORT 	= process.env.REACT_APP_BACKEND_PORT || '3042';
 export const INFERENCE_PORT = process.env.REACT_APP_INFERENCE_PORT || '8042';
@@ -20,9 +24,9 @@ export const N8N_WEBHOOKS 		= process.env.REACT_APP_WEBHOOK_URL
       url.startsWith('http') ? `${N8N_API_URL}${new URL(url).pathname}` : url
     )
   : [
-      `${N8N_API_URL}/webhook-test/invoke_recording`,
-      `${N8N_API_URL}/webhook-test/invoke_audio`,
-      `${N8N_API_URL}/webhook/your-uuid/chat`,
+      `${N8N_API_URL}/webhook-test/1`,
+      `${N8N_API_URL}/webhook-test/2`,
+      `${N8N_API_URL}/webhook/3`,
     ];
 
 // MQTT Topics

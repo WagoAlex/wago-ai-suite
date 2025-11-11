@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Typography, Box, Switch, FormControlLabel, Alert } from '@mui/material';
 import axios from 'axios';
 
-function Autiomation() {
+function Automation() {
   // Initialize isN8nEnabled from localStorage with error handling
   const [isN8nEnabled, setIsN8nEnabled] = useState(() => {
     try {
@@ -138,4 +138,4 @@ function Autiomation() {
   );
 }
 
-export default Autiomation;
+export default Automation;

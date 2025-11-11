@@ -328,6 +328,26 @@ app.post('/api/containers/:name/start', async (req, res) => {
   }
 });
 
+// Restart a container
+app.post('/api/containers/:name/restart', async (req, res) => {
+  const { name } = req.params;
+  const { inferenceServerType, remoteInferenceUrl } = req.body;
+  logger.info('Restarting container', { name, inferenceServerType });
+  try {
+    const dockerInstance = isInferenceContainer(name)
+      ? getDockerInstance(inferenceServerType, remoteInferenceUrl)
+      : localDocker;
+    const container = dockerInstance.getContainer(name);
+    await container.restart();
+    logger.info(`Container ${name} restarted successfully`);
+    res.status(200).json({ message: `${name} restarted` });
+  } catch (error) {
+    logger.error(`Error stopping container ${name}`, { error: error.message, stack: error.stack });
+    res.status(500).json({ error: 'Failed to restart container', details: error.message });
+  }
+});
+
+
 // Stop a container
 app.post('/api/containers/:name/stop', async (req, res) => {
   const { name } = req.params;
@@ -502,6 +522,118 @@ app.get('/api/n8n/containers', async (req, res) => {
 });
 
 
+app.post('/api/n8n/config', async (req, res) => {
+  const { enabled } = req.body;
+  logger.info('Updating n8n config', { enabled });
+  
+  try {
+    const containers = await localDocker.listContainers({ all: true });
+    const n8nContainer = containers.find((container) =>
+      container.Names.some((name) => name.includes('n8n') && !name.includes('import'))
+    );
+    
+    if (!n8nContainer) {
+      logger.warn('n8n container not found');
+      return res.status(404).json({ error: 'n8n container not found' });
+    }
+    
+    const containerName = n8nContainer.Names[0].replace(/^\//, '');
+    logger.info(`Found n8n container: ${containerName}, current state: ${n8nContainer.State}`);
+    
+    const container = localDocker.getContainer(n8nContainer.Id);
+    
+    try {
+      if (enabled) {
+        const containerInfo = await container.inspect();
+        if (containerInfo.State.Running) {
+          logger.info('n8n container is already running', { containerName });
+          return res.status(200).json({ message: 'n8n is already running' });
+        }
+        
+        logger.info('Starting n8n container', { containerName });
+        await container.start();
+        logger.info('n8n container started successfully', { containerName });
+      } else {
+        const containerInfo = await container.inspect();
+        if (!containerInfo.State.Running) {
+          logger.info('n8n container is already stopped', { containerName });
+          return res.status(200).json({ message: 'n8n is already stopped' });
+        }
+        
+        logger.info('Stopping n8n container', { containerName });
+        await container.stop();
+        logger.info('n8n container stopped successfully', { containerName });
+      }
+      
+      res.status(200).json({ message: 'n8n config updated' });
+    } catch (dockerError) {
+      logger.error('Docker operation error for n8n', { 
+        error: dockerError.message, 
+        stack: dockerError.stack 
+      });
+      
+      if (dockerError.statusCode === 304) {
+        logger.info('n8n state unchanged', { containerName });
+        return res.status(200).json({ message: 'n8n state unchanged' });
+      }
+      
+      throw dockerError;
+    }
+  } catch (error) {
+    logger.error('Error updating n8n config', { 
+      error: error.message, 
+      stack: error.stack 
+    });
+    
+    res.status(500).json({
+      error: 'Failed to update n8n config',
+      details: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+
+// n8n health check endpoint
+app.get('/api/n8n/health', async (req, res) => {
+  logger.info('Checking n8n health');
+  
+  try {
+    // Check if n8n container is running
+    const containers = await localDocker.listContainers({ all: true });
+    const n8nContainer = containers.find((container) =>
+      container.Names.some((name) => name.includes('n8n') && !name.includes('import'))
+    );
+    
+    if (!n8nContainer) {
+      return res.status(404).json({ 
+        status: 'not_found', 
+        error: 'n8n container not found' 
+      });
+    }
+    
+    const containerName = n8nContainer.Names[0].replace(/^\//, '');
+    const isRunning = n8nContainer.State === 'running';
+    
+    res.status(200).json({
+      status: isRunning ? 'running' : 'stopped',
+      containerName,
+      containerState: n8nContainer.State
+    });
+    
+  } catch (error) {
+    logger.error('Error checking n8n health', { 
+      error: error.message, 
+      stack: error.stack 
+    });
+    
+    res.status(500).json({
+      status: 'error',
+      error: 'Failed to check n8n health',
+      details: error.message
+    });
+  }
+});
 // Update Label Studio config
 app.post('/api/labelstudio/config', async (req, res) => {
   const { enabled } = req.body;
@@ -639,7 +771,7 @@ app.get('/api/inference/health', async (req, res) => {
   debouncedInfo('Checking inference health', { inferenceServerType, remoteInferenceUrl });
 
   try {
-    let targetHost = 'localhost';
+    let targetHost = process.env.SERVER_NAME || '192.168.2.17';
     let targetPort = portInference;
 
     if (inferenceServerType === 'remote' && remoteInferenceUrl) {
@@ -656,6 +788,7 @@ app.get('/api/inference/health', async (req, res) => {
     }
 
     const healthUrl = `http://${targetHost}:${targetPort}/health`;
+	logger.info('Health check URL:', { healthUrl });  
     const response = await fetch(healthUrl, { timeout: 5000, headers: { 'Accept': 'application/json' } });
 
     if (!response.ok) {
@@ -689,7 +822,7 @@ app.get('/api/video/stream', (req, res) => {
     logger.warn('Source required for video stream');
     return res.status(400).json({ error: 'Source required' });
   }
-  let targetHost = 'localhost';
+  let targetHost = process.env.SERVER_NAME || '192.168.2.17'
   let targetPort = portInference;
   let targetProtocol = 'http';
   if (inferenceServerType === 'remote' && remoteInferenceUrl) {
@@ -806,7 +939,7 @@ app.get('/api/video/stream', (req, res) => {
         });
         let details = err.message;
         let status = 502;
-        let hint = 'Verify FastAPI on 192.168.2.116:8042 (docker exec wago-ai-suite-backend curl http://192.168.2.116:8042/health). Check firewall on remote (firewall-cmd --list-rich-rules).';
+        let hint = 'Verify FastAPI on 192.168.2.17:8042 (docker exec wago-ai-suite-backend curl http://192.168.2.117:8042/health). Check firewall on remote (firewall-cmd --list-rich-rules).';
         if (err.code === 'ECONNREFUSED') {
           details = `Connection refused to ${targetHost}:${targetPort} - Ensure FastAPI is running and port 8042 is open.`;
         } else if (err.code === 'ETIMEDOUT') {
@@ -943,14 +1076,14 @@ app.get('/api/remote/video/:segment_name', (req, res) => {
         });
         let details = err.message;
         let status = 502;
-        let hint = 'Verify FastAPI on 192.168.2.116:8042 (docker exec wago-ai-suite-backend curl http://192.168.2.116:8042/health). Check firewall on remote (firewall-cmd --list-rich-rules).';
+        let hint = 'Verify FastAPI on 192.168.2.17:8042 (docker exec wago-ai-suite-backend curl http://192.168.2.17:8042/health). Check firewall on remote (firewall-cmd --list-rich-rules).';
         if (err.code === 'ECONNREFUSED') {
           details = `Connection refused to ${targetHost}:${targetPort} - Ensure FastAPI is running and port 8042 is open.`;
         } else if (err.code === 'ETIMEDOUT') {
           details = `Timeout connecting to ${targetHost}:${targetPort}. Check network latency or increase proxyTimeout.`;
           status = 504;
         } else if (err.code === 'ENOTFOUND') {
-          details = `Host ${targetHost} not found - Verify DNS (nslookup 192.168.2.116).`;
+          details = `Host ${targetHost} not found - Verify DNS (nslookup 192.168.2.17).`;
         } else if (err.code === 'ECONNRESET') {
           details = `Connection reset by ${targetHost}:${targetPort} - Check FastAPI logs (docker logs wago-hailo-yolov5m-helmet-webcam).`;
         }

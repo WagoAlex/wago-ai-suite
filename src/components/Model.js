@@ -2,8 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   Typography,
   Box,
-  Switch,
-  FormControlLabel,
   Alert,
   Card,
   CardContent,
@@ -17,35 +15,18 @@ import axios from 'axios';
 const jupyterUrl = '/jupyter/lab';
 
 function Model() {
-  // State for toggling JupyterLab
-  const [isJupyterEnabled, setIsJupyterEnabled] = useState(() => {
-    try {
-      const savedState = localStorage.getItem('isJupyterEnabled');
-      return savedState ? JSON.parse(savedState) : false;
-    } catch (e) {
-      console.error('Failed to parse isJupyterEnabled from localStorage:', e);
-      return false;
-    }
-  });
-
   // State for container information
   const [jupyterContainerName, setJupyterContainerName] = useState(null);
   const [containerStatus, setContainerStatus] = useState('unknown');
   const [errorMessage, setErrorMessage] = useState(null);
-  const [isUpdating, setIsUpdating] = useState(false);
   const [containerHint, setContainerHint] = useState(null);
-  const [jupyterContainers, setJupyterContainers] = useState([]); // List of Jupyter containers
-  const [selectedContainerReason, setSelectedContainerReason] = useState(''); // Reason for selected container
-
-  // Persist enabled state to localStorage
-  useEffect(() => {
-    localStorage.setItem('isJupyterEnabled', JSON.stringify(isJupyterEnabled));
-  }, [isJupyterEnabled]);
+  const [jupyterContainers, setJupyterContainers] = useState([]);
+  const [selectedContainerReason, setSelectedContainerReason] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
 
   // Fetch Jupyter container info and status
   const fetchContainerInfo = async () => {
     try {
-      // Fetch list of Jupyter containers from dedicated endpoint
       const response = await axios.get('/api/jupyter/containers');
       const containers = response.data;
       setJupyterContainers(containers);
@@ -55,6 +36,7 @@ function Model() {
         setJupyterContainerName(null);
         setContainerStatus('unknown');
         setSelectedContainerReason('No containers with "jupyter" in the name were detected.');
+        setIsLoading(false);
         return;
       }
 
@@ -76,12 +58,14 @@ function Model() {
       } else {
         setContainerHint(`Container ${targetContainer.name} is ${targetContainer.status}. Ensure it is running to access JupyterLab.`);
       }
+      setIsLoading(false);
     } catch (error) {
       console.error('Error fetching Jupyter container info:', error);
       setErrorMessage(error.response?.data?.error || 'No Jupyter container found with name pattern "jupyter". Please ensure a container like "wago-jupyter-lab" is running.');
       setJupyterContainerName(null);
       setContainerStatus('unknown');
       setSelectedContainerReason('Error fetching container information.');
+      setIsLoading(false);
     }
   };
 
@@ -91,37 +75,6 @@ function Model() {
     const interval = setInterval(fetchContainerInfo, 5000);
     return () => clearInterval(interval);
   }, []);
-
-  // Handle toggle for enabling/disabling Jupyter
-  const handleToggle = async (event) => {
-    const enabled = event.target.checked;
-    setIsJupyterEnabled(enabled);
-    setErrorMessage(null);
-    setIsUpdating(true);
-
-    try {
-      // Update backend configuration (assumes /api/jupyter/config endpoint from index.js)
-      const response = await axios.post('/api/jupyter/config', { enabled });
-      console.log('Jupyter config updated:', response.data);
-
-      if (response.data.hint) {
-        setContainerHint(response.data.hint);
-      }
-
-      // Wait for container status update
-      if (enabled) {
-        setTimeout(fetchContainerInfo, 3000);
-      } else {
-        await fetchContainerInfo();
-      }
-    } catch (error) {
-      console.error('Error updating Jupyter config:', error);
-      setErrorMessage(error.response?.data?.error || 'Failed to update Jupyter configuration');
-      setIsJupyterEnabled(!enabled); // Revert on failure
-    } finally {
-      setIsUpdating(false);
-    }
-  };
 
   // Get LED color based on container status
   const getLedColor = () => {
@@ -154,12 +107,22 @@ function Model() {
       <Typography variant="h6" gutterBottom>
         Create a Model - JupyterLab
       </Typography>
-      {/* Control Panel */}
-      <Card sx={{ mb: 2 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
-            
-            {jupyterContainerName && (
+      
+      {/* Loading State */}
+      {isLoading && (
+        <Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '200px' }}>
+          <CircularProgress />
+          <Typography variant="body1" sx={{ ml: 2 }}>
+            Loading Jupyter container information...
+          </Typography>
+        </Box>
+      )}
+
+      {/* Container Status Panel - nur wenn Container gefunden */}
+      {!isLoading && jupyterContainerName && (
+        <Card sx={{ mb: 2 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, flexWrap: 'wrap' }}>
               <Tooltip title={selectedContainerReason}>
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Typography variant="body2">
@@ -177,16 +140,10 @@ function Model() {
                   {getStatusChip()}
                 </Box>
               </Tooltip>
-            )}
-            {isUpdating && (
-              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-                <CircularProgress size={16} />
-                <Typography variant="body2">Updating...</Typography>
-              </Box>
-            )}
-          </Box>
-        </CardContent>
-      </Card>
+            </Box>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Container hint */}
       {containerHint && (
@@ -202,8 +159,8 @@ function Model() {
         </Alert>
       )}
 
-      {/* JupyterLab iframe */}
-      {isJupyterEnabled && jupyterContainerName && (
+      {/* JupyterLab iframe - NUR WENN CONTAINER GEFUNDEN */}
+      {!isLoading && jupyterContainerName && (
         <Card>
           <CardContent sx={{ p: 0 }}>
             <Box sx={{ position: 'relative', minHeight: '600px' }}>
@@ -226,13 +183,15 @@ function Model() {
         </Card>
       )}
 
-      {/* Help text when no container is found or not running */}
-      {isJupyterEnabled && !jupyterContainerName && (
+      {/* Help text when no container is found */}
+      {!isLoading && !jupyterContainerName && (
         <Alert severity="warning" sx={{ mt: 2 }}>
-          No Jupyter containers found with name pattern "jupyter". Please ensure a container like "wago-jupyter-lab" is running.
+          No Jupyter containers found with name pattern "jupyter". Please ensure a container like "wago-jupyter-lab-cpu" is running.
         </Alert>
       )}
-      {isJupyterEnabled && jupyterContainerName && containerStatus !== 'running' && (
+      
+      {/* Warning when container is not running */}
+      {!isLoading && jupyterContainerName && containerStatus !== 'running' && (
         <Alert severity="warning" sx={{ mt: 2 }}>
           JupyterLab container ({jupyterContainerName}) is not running (status: {containerStatus}). Please wait for it to start or check the container logs for details.
         </Alert>

@@ -12,7 +12,6 @@ import {
   CircularProgress,
   TextField,
   Input,
-  Collapse,
   Chip,
   Alert,
   Tooltip,
@@ -22,15 +21,19 @@ import {
   Grid,
   InputAdornment,
   IconButton,
-  FormControlLabel,
-  Switch,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AddIcon from '@mui/icons-material/Add';
 import axios from 'axios';
 import { SERVER_NAME } from '../config';
 import { useMqtt } from '../MqttContext';
+/*
 const API_URL = `https://${SERVER_NAME}`;
+*/
+const API_URL = '';
+console.log('API_URL:', API_URL);
+console.log('Browser location:', window.location.hostname);
+
 const VisualInference = ({ inferenceServerType, setInferenceServerType, remoteInferenceUrl, setRemoteInferenceUrl }) => {
   const [inputSource, setInputSource] = useState('webcam');
   const [rtspUrl, setRtspUrl] = useState('rtsp://admin:Master1!@192.168.2.189:554/h264Preview_01_main');
@@ -60,7 +63,6 @@ const VisualInference = ({ inferenceServerType, setInferenceServerType, remoteIn
   const [canvasDimensions, setCanvasDimensions] = useState({ width: 640, height: 640 });
   const [parseError, setParseError] = useState(null);
   const [reconnecting, setReconnecting] = useState(false);
-  const [showOverlay, setShowOverlay] = useState(false);
   const lastGoodDataURL = useRef(null);
   const streamTimestamp = useRef(Date.now());
   const reconnectAttempt = useRef(0);
@@ -68,51 +70,67 @@ const VisualInference = ({ inferenceServerType, setInferenceServerType, remoteIn
   const BASE_RETRY_DELAY = 10000; // Start at 10s
   const MAX_RETRY_DELAY = 30000; // Cap at 30s
   const MAX_RETRIES = 5; // Stop after 5 attempts
+
   // Multi-camera state
   const [cameraOptions, setCameraOptions] = useState([
     { id: 0, label: 'Reolink (Default)', url: 'rtsp://admin:Master1!@192.168.2.189:554/h264Preview_01_main' },
-    { id: 1, label: 'SICK Camera Template 1', url: 'rtsp://<ip>:554/live/0' },
-    { id: 2, label: 'SICK Camera Template 2', url: 'rtsp://<ip>:554/live/1' },
+    { id: 1, label: 'SICK Camera Template', url: 'rtsp://<ip>:554/live/0' },
+    { id: 2, label: 'Hikvision Camera Template', url: 'rtsp://<benutzername>:<passwort>@<IP-Adresse>:<RTSP port>/Streaming/channels/<Kanal-Nr>' },
   ]);
   const [selectedCamera, setSelectedCamera] = useState(0);
   const [customRtsp, setCustomRtsp] = useState('');
   const [numCameras, setNumCameras] = useState(1);
-  const [hailoContainers, setHailoContainers] = useState([]);
-  const hlsConfig = {
-	  lowLatencyMode: true,  // Enable for live stream (reduces buffering)
-	  enableWorker: true,
-	  backBufferLength: 0,  // No back buffer for live
-	  maxBufferLength: 5,  // Increase to 20s for more upfront data (steady stream)
-	  maxMaxBufferLength: 10,  // Cap higher for preload buffer
-	  capLevelToPlayerSize: true,  // Adapt to player size for smoothness
-	  smoothSwitching: true,  // Smooth level switching
-	  abrEwmaFastLive: 2.0,  // Faster ABR adaptation for live (was 3.0)
-	  abrEwmaSlowLive: 6.0,  // Slightly faster slow adaptation
-	  abrBandWidthFactor: 0.9,  // More aggressive bandwidth estimation
-	  abrBandWidthUpFactor: 0.8,
-	  testBandwidth: false,
-	  liveSyncDurationCount: 1,  // Sync closer to live edge (was 3; reduces latency)
-	  progressive: true,  // Progressive loading for smoothness
-	  startFragPrefetch: true,  // Prefetch first frag
-	  maxFragLookUpTolerance: 0.1,  //Tighter fragment lookup for steady segments
-	  autoStartLoad: true  // Start loading immediately for upfront data
+
+// HLS.js configuration for optimized low-latency live streaming
+const hlsConfig = {
+  // --- Latency & Live Stream Behavior ---
+  lowLatencyMode: true,              // Enables Low-Latency HLS mode for minimal delay
+  liveSyncDurationCount: 1,          // Target number of segments to stay behind live edge
+  liveMaxLatencyDurationCount: 3,    // Maximum allowed segment distance from live edge before seeking forward
+
+  // --- Buffering & Memory Management ---
+  maxBufferLength: 10,               // Max seconds of buffer to store (for smoother playback)
+  maxMaxBufferLength: 15,            // Absolute upper limit for buffer size 
+  backBufferLength: 5,               // Amount of previous content (in seconds) to retain 
+  maxBufferSize: 60 * 1000 * 1000,   // Maximum buffer size in bytes (new; prevents memory bloat)
+
+  // --- Performance & Worker Settings ---
+  enableWorker: true,                // Use web workers for background processing to improve performance
+
+  // --- Adaptive Bitrate (ABR) Tuning ---
+  abrEwmaFastLive: 3.0,              // Fast EWMA half-life (was 2.0) – reacts faster to bandwidth drops
+  abrEwmaSlowLive: 9.0,              // Slow EWMA half-life (was 6.0) – smoother adaptation over time
+  abrBandWidthFactor: 0.95,          // Multiplier to slightly undercut measured bandwidth (was 0.9)
+  maxFragLookUpTolerance: 0.25,      // Tolerance when matching fragment start times (was 0.1)
+
+  // --- Bandwidth & Loading Behavior ---
+  testBandwidth: true,               // Enables bandwidth test before playback (was false)
+  startFragPrefetch: true,           // Start loading next fragment early for seamless playback
+  progressive: true,                 // Enables progressive download while playing
+  capLevelToPlayerSize: true,        // Avoids loading higher resolution than player can display
+  smoothSwitching: true,             // Enables seamless quality transitions during playback
+  autoStartLoad: true,               // Automatically start loading segments when attached
+
+  // --- Retry Logic ---
+  fragLoadingMaxRetry: 6,            // Max retry attempts for fragment loading 
+  manifestLoadingMaxRetry: 3,        // Max retry attempts for manifest loading 
 };
 
 
- useEffect(() => {
+  // Auto-clear stream error after 5s
+  useEffect(() => {
     if (streamError) {
       const currentError = streamError;
-
       const timer = setTimeout(() => {
-        // prüfen ob Fehler noch derselbe ist
         if (streamError === currentError) {
           setStreamError(null);
         }
       }, 5000);
-
       return () => clearTimeout(timer);
     }
   }, [streamError]);
+
+  // Load/save camera options to sessionStorage
   useEffect(() => {
     const savedCameras = sessionStorage.getItem('cameraOptions');
     if (savedCameras) {
@@ -122,6 +140,15 @@ const VisualInference = ({ inferenceServerType, setInferenceServerType, remoteIn
   useEffect(() => {
     sessionStorage.setItem('cameraOptions', JSON.stringify(cameraOptions));
   }, [cameraOptions]);
+
+	useEffect(() => {
+	  const selectedCameraOption = cameraOptions.find(opt => opt.id === selectedCamera);
+	  if (selectedCameraOption && inputSource === 'rtsp') {
+		setRtspUrl(selectedCameraOption.url);
+	  }
+	}, [selectedCamera, cameraOptions, inputSource]);
+
+  // Loading animation
   useEffect(() => {
     if (loading) {
       const interval = setInterval(() => {
@@ -132,136 +159,228 @@ const VisualInference = ({ inferenceServerType, setInferenceServerType, remoteIn
       setThinkingDots('.');
     }
   }, [loading]);
-  
-  useEffect(() => {
-  fetchStatus(); // Fetch on initial load
-}, []); 
 
-useEffect(() => {
-  const fetchAndLogContainers = async () => {
+  // Fetch inference containers
+  useEffect(() => {
+    const fetchAndLogContainers = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/api/inference-containers`, {
+          params: { inferenceServerType, remoteInferenceUrl },
+        });
+        const containers = response.data;
+        console.info('Fetched inference containers:', containers);
+        setInferenceContainers(containers);
+      } catch (error) {
+        console.error('Error fetching inference containers:', error);
+        setStreamError('Failed to fetch inference containers: ' + (error.response?.data?.error || error.message));
+      }
+    };
+    fetchAndLogContainers();
+  }, [inferenceServerType, remoteInferenceUrl]);
+
+  // Dynamic container selection
+  useEffect(() => {
+    if (inferenceContainers.length === 0) {
+      setContainerName('');
+      setContainerHint('No inference containers available.');
+      return;
+    }
+
+    const sourceKeywords = inputSource === 'webcam' ? ['webcam', 'cam'] : ['rtsp'];
+    const matchingContainers = inferenceContainers.filter(c =>
+      c.name.startsWith('wago-hailo-') &&
+      sourceKeywords.some(kw => c.name.toLowerCase().includes(kw.toLowerCase()))
+    );
+
+    if (matchingContainers.length > 0) {
+      setContainerName(matchingContainers[0].name);
+      setContainerHint(matchingContainers.length > 1
+        ? `Multiple matching containers found: ${matchingContainers.map(c => c.name).join(', ')}. Using ${matchingContainers[0].name}.`
+        : null);
+    } else {
+      setContainerName('');
+      setContainerHint(`No matching inference container found for ${inputSource}. Available: ${inferenceContainers.map(c => c.name).join(', ') || 'None'}. Ensure container name includes 'wago-hailo-' and source keyword (e.g., 'webcam' or 'rtsp').`);
+    }
+  }, [inferenceContainers, inputSource]);
+
+  // Fetch container status
+  const fetchStatus = async () => {
+    if (!containerName) return;
+    setStreamError(null);
+    setContainerHint(null);
+    checkHostStatus();
     try {
-      const response = await axios.get(`${API_URL}/api/inference-containers`, {
+      const response = await axios.get(`${API_URL}/api/containers/${containerName}/status`, {
         params: { inferenceServerType, remoteInferenceUrl },
       });
-      const containers = response.data;
-      console.info('Fetched inference containers:', containers); // Log all containers as info
-      // Existing logic to set states can follow if needed
+      setStatus(response.data.status);
     } catch (error) {
-      console.error('Error fetching inference containers:', error);
+      console.error('Error fetching status:', error);
+      setStatus('unknown');
+      const details = error.response?.data?.details || error.message;
+      if (details.includes('no such container')) {
+        setStreamError(`Container ${containerName} not found. Check Docker on ${inferenceServerType} host.`);
+      } else {
+        setStreamError(`Failed to fetch status for ${containerName}: ${details}`);
+      }
     }
   };
-  fetchAndLogContainers(); // Fetch and log on state change
-}, [inferenceServerType, remoteInferenceUrl]); // Deps for changes
-useEffect(() => {
-  const fetchHealth = async () => {
-    if (status !== 'running') return;
+
+  useEffect(() => {
+    if (containerName) {
+      fetchStatus();
+      const interval = setInterval(fetchStatus, 10000);
+      return () => clearInterval(interval);
+    }
+  }, [containerName, inferenceServerType, remoteInferenceUrl]);
+
+
+// Fetch health status
+	useEffect(() => {
+	  const fetchHealth = async () => {
+		if (status !== 'running' || !containerName) return;
+		try {
+		  //  Nur im Remote-Modus remoteInferenceUrl mitschicken
+		  const params = { inferenceServerType };
+		  
+		  if (inferenceServerType === 'remote' && remoteInferenceUrl) {
+			const inferencePort = process.env.REACT_APP_INFERENCE_PORT || '8042';
+			const url = new URL(remoteInferenceUrl.startsWith('http') ? remoteInferenceUrl : `https://${remoteInferenceUrl}`);
+			url.port = inferencePort;
+			params.remoteInferenceUrl = url.toString();
+		  }
+		  
+		  const response = await axios.get(`${API_URL}/api/inference/health`, { params });
+		  setNumCameras(response.data.cameras.length);
+		} catch (error) {
+		  console.error('Health check failed:', error);
+		  setStreamError('Failed to fetch health status: ' + (error.response?.data?.error || error.message));
+		}
+	  };
+	  fetchHealth();
+	}, [status, containerName, inferenceServerType, remoteInferenceUrl]);
+  const handleUploadCertificates = async () => {
+    if (!caFile || !certFile || !keyFile) {
+      alert('Please select all certificate files');
+      return;
+    }
     try {
-      let effectiveRemoteUrl = remoteInferenceUrl;
-     
-      const inferencePort = process.env.REACT_APP_INFERENCE_PORT || '8042';
-      const url = new URL(remoteInferenceUrl);
-      url.port = inferencePort; // Replace port with INFERENCE_PORT
-      effectiveRemoteUrl = url.toString();
-      
-      const response = await axios.get(`${API_URL}/api/inference/health`, {
-        params: { inferenceServerType, remoteInferenceUrl: effectiveRemoteUrl }
-      });
-      setNumCameras(response.data.cameras.length);
+      const formData = new FormData();
+      formData.append('ca', caFile);
+      formData.append('cert', certFile);
+      formData.append('key', keyFile);
+      await axios.post(`${API_URL}/api/upload-certificates`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }, { timeout: 10000 });
+      alert('Certificates uploaded successfully');
     } catch (error) {
-      console.error('Health check failed:', error);
-      setStreamError('Failed to fetch health status: ' + (error.response?.data?.error || error.message));
+      console.error('Error uploading certificates:', error);
+      alert('Failed to upload certificates: ' + (error.response?.data?.details || error.message));
     }
   };
-  fetchHealth();
-}, [status, inferenceServerType, remoteInferenceUrl]);
 
+  const handleStart = async () => {
+    if (!containerName) {
+      setStreamError('No suitable container found for start. Check available containers.');
+      return;
+    }
+    setLoading(true);
+    setStreamError(null);
+    setParseError(null);
+    try {
+      await axios.post(`${API_URL}/api/containers/${containerName}/start`, {
+        inferenceServerType,
+        remoteInferenceUrl,
+        source: inputSource,
+        rtspUrl: inputSource === 'rtsp' ? rtspUrl : undefined,
+      }, { timeout: 30000 });
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      await fetchStatus();
+      await fetchLogs(true);
+      initStream();
+    } catch (error) {
+      console.error('Error starting container:', error);
+      const errorMessage = error.response?.status === 400
+        ? `Invalid stream parameters for ${containerName}. Ensure ${inputSource} is supported by the container${inputSource === 'webcam' ? ' and webcam device is available' : ' and RTSP URL is valid'}.`
+        : error.response?.data?.details || `Failed to start ${containerName}: ${error.message}. Check backend logs for Docker issues.`;
+      setStreamError(errorMessage);
+      await fetchLogs(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
- const handleUploadCertificates = async () => {
-  if (!caFile || !certFile || !keyFile) {
-    alert('Please select all certificate files');
-    return;
-  }
-  try {
-    const formData = new FormData();
-    formData.append('ca', caFile);
-    formData.append('cert', certFile);
-    formData.append('key', keyFile);
-    await axios.post(`${API_URL}/api/upload-certificates`, formData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    }, { timeout: 10000 });
-    alert('Certificates uploaded successfully');
-  } catch (error) {
-    console.error('Error uploading certificates:', error);
-    alert('Failed to upload certificates: ' + (error.response?.data?.details || error.message));
-  }
-};
-const handleStart = async () => {
-  const targetName = getTargetContainerName();
-  setContainerName(targetName);
-  setLoading(true);
-  setStreamError(null);
-  setParseError(null);
-  try {
-    await axios.post(`${API_URL}/api/containers/${targetName}/start`, {
-      inferenceServerType,
-      remoteInferenceUrl,
-      source: inputSource,
-      rtspUrl: inputSource === 'rtsp' ? rtspUrl : undefined,
-    }, { timeout: 30000 });
-    await new Promise(resolve => setTimeout(resolve, 10000)); // Wait for inference to start
-    await fetchStatus();
-    await fetchLogs(true);
-    initStream(); // Trigger HLS stream initialization
-  } catch (error) {
-    console.error('Error starting container:', error);
-    const errorMessage = error.response?.status === 400
-      ? `Invalid stream parameters for ${targetName}. Ensure ${inputSource} is supported by the container${inputSource === 'webcam' ? ' and webcam device is available' : ' and RTSP URL is valid'}.`
-      : error.response?.data?.details || `Failed to start ${targetName}: ${error.message}. Check backend logs for Docker issues.`;
-    setStreamError(errorMessage);
-    await fetchLogs(true);
-  } finally {
-    setLoading(false);
-  }
-};
+  const handleStop = async () => {
+    if (!containerName) {
+      setStreamError('No container selected for stop.');
+      return;
+    }
+    setLoading(true);
+    setStreamError(null);
+    setParseError(null);
+    try {
+      await axios.post(`${API_URL}/api/containers/${containerName}/stop`, {
+        inferenceServerType,
+        remoteInferenceUrl,
+        source: inputSource,
+      }, { timeout: 30000 });
+      await fetchStatus();
+      setLogs('');
+      setDetections([]);
+      if (hlsRef.current) hlsRef.current.destroy();
+      if (videoRef.current) videoRef.current.src = '';
+      setImageLoaded(false);
+    } catch (error) {
+      console.error('Error stopping container:', error);
+      setStreamError(error.response?.data?.details || `Failed to stop ${containerName}: ${error.message}.`);
+      await fetchLogs(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
- const handleStop = async () => {
-  setLoading(true);
-  setStreamError(null);
-  setParseError(null);
-  try {
-    await axios.post(`${API_URL}/api/containers/${containerName}/stop`, {
-      inferenceServerType,
-      remoteInferenceUrl,
-      source: inputSource,
-    }, { timeout: 30000 });
-    await fetchStatus();
-    setLogs('');
-    setDetections([]);
-    if (hlsRef.current) hlsRef.current.destroy();
-    if (videoRef.current) videoRef.current.src = '';
-    setImageLoaded(false);
-  } catch (error) {
-    console.error('Error stopping container:', error);
-    setStreamError(error.response?.data?.details || `Failed to stop ${containerName}: ${error.message}.`);
-    await fetchLogs(true);
-  } finally {
-    setLoading(false);
-  }
-};
+  const handleRestart = async () => {
+    if (!containerName) {
+      setStreamError('No container selected for restart.');
+      return;
+    }
+    setLoading(true);
+    setStreamError(null);
+    setParseError(null);
+    try {
+      await axios.post(`${API_URL}/api/containers/${containerName}/restart`, {
+        inferenceServerType,
+        remoteInferenceUrl,
+        source: inputSource,
+      }, { timeout: 30000 });
+      await new Promise(resolve => setTimeout(resolve, 10000));
+      await fetchStatus();
+      await fetchLogs(true);
+      initStream();
+    } catch (error) {
+      console.error('Error restarting container:', error);
+      setStreamError(error.response?.data?.details || `Failed to restart ${containerName}: ${error.message}.`);
+      await fetchLogs(true);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-const updateCameraUrl = (id, newUrl) => {
-  const updatedOptions = cameraOptions.map((opt) =>
-    opt.id === id ? { ...opt, url: newUrl } : opt
-  );
-  setCameraOptions(updatedOptions);
-};
+  const updateCameraUrl = (id, newUrl) => {
+    const updatedOptions = cameraOptions.map((opt) =>
+      opt.id === id ? { ...opt, url: newUrl } : opt
+    );
+    setCameraOptions(updatedOptions);
+  };
 
-const addCustomCamera = () => {
-  if (customRtsp) {
-    setCameraOptions([...cameraOptions, { id: cameraOptions.length, label: 'Custom RTSP', url: customRtsp }]);
-    setCustomRtsp('');
-  }
-};
+  const addCustomCamera = () => {
+    if (customRtsp) {
+      setCameraOptions([...cameraOptions, { id: cameraOptions.length, label: 'Custom RTSP', url: customRtsp }]);
+      setCustomRtsp('');
+    }
+  };
+
+/*
   const drawDetections = useCallback((ctx, width, height) => {
     detections.forEach((det) => {
       let [x1, y1, x2, y2] = det.box;
@@ -288,29 +407,32 @@ const addCustomCamera = () => {
         ctx.fillStyle = 'lime';
         ctx.font = '14px Arial';
         ctx.fillText(`${det.class}: ${(det.confidence * 100).toFixed(2)}%`, x1, y1 - 10 > 0 ? y1 - 10 : y1 + 15);
-      } else if (showOverlay && process.env.NODE_ENV === 'development') {
-        console.info('Detection :', det);
       }
     });
-  }, [detections, showOverlay]);
+  }, [detections]);
+
   const drawOverlay = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
-    if (video && canvas && showOverlay && detections.length > 0) {
+    if (video && canvas && detections.length > 0) {
       canvas.width = video.videoWidth;
       canvas.height = video.videoHeight;
       const ctx = canvas.getContext('2d');
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      drawDetections(ctx, canvas.width, canvas.height);
+      //drawDetections(ctx, canvas.width, canvas.height);
     }
     rafId.current = requestAnimationFrame(drawOverlay);
-  }, [detections, showOverlay, drawDetections]);
+  //}, [detections, drawDetections]);
+}, [detections]);
+
+
   useEffect(() => {
-    if (status === 'running' && !loading && showOverlay) {
+    if (status === 'running' && !loading && detections.length > 0) {
       rafId.current = requestAnimationFrame(drawOverlay);
       return () => cancelAnimationFrame(rafId.current);
     }
-  }, [status, loading, showOverlay, drawOverlay]);
+  }, [status, loading, drawOverlay]);
+*/
   useEffect(() => {
     if (client && mqttStatus === 'Connected') {
       client.subscribe('inference/#', { qos: 1 }, (err) => {
@@ -319,30 +441,29 @@ const addCustomCamera = () => {
           setParseError('Failed to subscribe to inference topic.');
         }
       });
-const handleMessage = (topic, message) => { // Removed debounce for real-time updates
-  if (topic === 'inference/yolov5m-results') {
-try {
-  const data = JSON.parse(message.toString());
-  let latestDetections = data.detections || [];
-  // Filter valid detections
-  latestDetections = latestDetections.filter(det =>
-det.class &&
-typeof det.confidence === 'number' &&
-det.confidence > 0 &&
-Array.isArray(det.box) &&
-det.box.length === 4 &&
-det.box.every(coord => typeof coord === 'number' && !isNaN(coord)) &&
-(det.box[2] - det.box[0] > 0) &&
-(det.box[3] - det.box[1] > 0)
-  );
-  setDetections(latestDetections);
-  setParseError(null);
-} catch (e) {
-  console.error('MQTT JSON parse error:', e);
-  setParseError(`MQTT parse error: ${e.message}`);
-}
-  }
-};
+      const handleMessage = (topic, message) => {
+        if (topic === 'inference/yolov5m-results') {
+          try {
+            const data = JSON.parse(message.toString());
+            let latestDetections = data.detections || [];
+            latestDetections = latestDetections.filter(det =>
+              det.class &&
+              typeof det.confidence === 'number' &&
+              det.confidence > 0 &&
+              Array.isArray(det.box) &&
+              det.box.length === 4 &&
+              det.box.every(coord => typeof coord === 'number' && !isNaN(coord)) &&
+              (det.box[2] - det.box[0] > 0) &&
+              (det.box[3] - det.box[1] > 0)
+            );
+            setDetections(latestDetections);
+            setParseError(null);
+          } catch (e) {
+            console.error('MQTT JSON parse error:', e);
+            setParseError(`MQTT parse error: ${e.message}`);
+          }
+        }
+      };
       client.on('message', handleMessage);
       return () => {
         client.unsubscribe('inference/#');
@@ -356,77 +477,35 @@ det.box.every(coord => typeof coord === 'number' && !isNaN(coord)) &&
       setTimeout(() => client.reconnect(), delay);
     }
   }, [client, mqttStatus, mqttError]);
-  const getTargetContainerName = () => `wago-hailo-yolov5m-helmet-${inputSource}`;
-  useEffect(() => {
-    setContainerName(getTargetContainerName());
-  }, [inputSource]);
-  const fetchStatus = async () => {
-    setStreamError(null);
-    setContainerHint(null);
-	checkHostStatus();
-    const targetName = getTargetContainerName();
-    if (!targetName) return;
+
+  const fetchLogs = useCallback(async (initial = false) => {
+    if (!containerName) {
+      setLogs('No container selected.');
+      return '';
+    }
     try {
-      const response = await axios.get(`${API_URL}/api/inference-containers`, {
-        params: { inferenceServerType, remoteInferenceUrl },
-      });
-      const containers = response.data;
-      // Removed console.log to reduce spam
-      const targetContainer = containers.find(c => c.name.toLowerCase().includes(`helmet-${inputSource.toLowerCase()}`));
-      if (!targetContainer) {
-        setStatus('unknown');
-        setContainerName(targetName);
-        setStreamError(`Container for ${inputSource} not found. Ensure wago-hailo-yolov5m-helmet-${inputSource} exists and is labeled correctly.`);
-        setContainerHint(`Available inference containers: ${containers.map(c => c.name).join(', ') || 'None'}.`);
-        return;
+      const params = {
+        inferenceServerType,
+        remoteInferenceUrl,
+        lines: initial ? 1000 : 200,
+        since: initial ? Math.floor(Date.now() / 1000) - 30 : undefined,
+      };
+      const response = await axios.get(`${API_URL}/api/containers/${containerName}/logs`, { params });
+      const lines = response.data.split('\n').filter(line => line.trim());
+      const recentLines = lines.slice(-42);
+      const reversedLogs = recentLines.reverse().join('\n');
+      setLogs(reversedLogs);
+      if (logsRef.current) {
+        logsRef.current.scrollTop = 0;
       }
-      setContainerName(targetContainer.name);
-      const statusResponse = await axios.get(`${API_URL}/api/containers/${targetContainer.name}/status`, {
-        params: { inferenceServerType, remoteInferenceUrl, source: inputSource },
-      });
-      setStatus(statusResponse.data.status);
-      setContainerHint(statusResponse.data.hint || null);
+      return reversedLogs;
     } catch (error) {
-      console.error('Error fetching status:', error);
-      setStatus('unknown');
-      const details = error.response?.data?.details || error.message;
-      if (details.includes('no such container')) {
-        setStreamError(`Container for ${inputSource} not found. Check Docker on ${inferenceServerType} host.`);
-      } else {
-        setStreamError(`Failed to fetch status for ${inputSource}: ${details}`);
-      }
+      console.error('Error fetching logs:', error);
+      setLogs(`Error fetching logs: ${error.message}`);
+      return '';
     }
-  };
- 
-const fetchLogs = useCallback(async (initial = false) => {
-  if (!containerName) {
-    setLogs('No container selected.');
-    return '';
-  }
-  try {
-    const params = {
-      inferenceServerType,
-      remoteInferenceUrl,
-      lines: initial ? 1000 : 200,
-      since: initial ? Math.floor(Date.now() / 1000) - 30 : undefined,
-    };
-    const response = await axios.get(`${API_URL}/api/containers/${containerName}/logs`, { params });
-    const lines = response.data.split('\n').filter(line => line.trim());
-    const recentLines = lines.slice(-42);
-    const reversedLogs = recentLines.reverse().join('\n');
-    setLogs(reversedLogs);
-    if (logsRef.current) {
-      logsRef.current.scrollTop = 0;
-    }
-    return reversedLogs;
-  } catch (error) {
-    console.error('Error fetching logs:', error);
-    setLogs(`Error fetching logs: ${error.message}`);
-    return '';
-  }
-}, [containerName, inferenceServerType, remoteInferenceUrl, API_URL]);
- 
- 
+  }, [containerName, inferenceServerType, remoteInferenceUrl]);
+
   const checkHostStatus = async () => {
     if (inferenceServerType === 'local') {
       setLocalHostStatus('checking');
@@ -434,7 +513,6 @@ const fetchLogs = useCallback(async (initial = false) => {
       setRemoteHostStatus('checking');
     }
     try {
-	
       await axios.get(`${API_URL}/api/inference-containers`, {
         params: { inferenceServerType, remoteInferenceUrl },
       });
@@ -453,99 +531,105 @@ const fetchLogs = useCallback(async (initial = false) => {
       setStreamError(`Host unreachable: ${errMsg}. Check Docker daemon and certificates.`);
     }
   };
-const getStreamUrl = useCallback(() => {
-  if (!inputSource || (inputSource === 'rtsp' && !rtspUrl)) {
-    setStreamError('Invalid stream parameters: source and rtspUrl (if RTSP) are required.');
-    return null;
-  }
-  if (inputSource === 'rtsp' && !/^rtsp:\/\//.test(rtspUrl)) {
-    setStreamError('Invalid RTSP URL: Must start with rtsp://');
-    return null;
-  }
-  let effectiveRemoteUrl = remoteInferenceUrl;
-  
-  const inferencePort = process.env.REACT_APP_INFERENCE_PORT || '8042';
-  const url = new URL(remoteInferenceUrl);
-  url.port = inferencePort; // Replace port with INFERENCE_PORT for stream
-  effectiveRemoteUrl = url.toString();
-  let base = `${API_URL}/api/video/stream?source=${inputSource}&inferenceServerType=${inferenceServerType}&remoteInferenceUrl=${encodeURIComponent(effectiveRemoteUrl)}`;
-  if (inputSource === 'rtsp') {
-    base += `&rtspUrl=${encodeURIComponent(rtspUrl)}`;
-  }
-  return base + '&t=' + Date.now(); // Cache bust
-}, [inputSource, rtspUrl, inferenceServerType, remoteInferenceUrl]);
 
-
-const initStream = () => {
-  if (status !== 'running' || loading) return;
-  const video = videoRef.current;
-  const url = getStreamUrl() + `&camera_id=${selectedCamera}`;
-  if (!url || !video) return;
-  setImageLoaded(false);
-  setStreamError(null);
-  if (hlsRef.current) {
-    hlsRef.current.destroy();
-  }
-  if (Hls.isSupported()) {
-    const hls = new Hls(hlsConfig);
-    hls.loadSource(url);
-    hls.attachMedia(video);
-    hls.on(Hls.Events.MANIFEST_PARSED, () => {
-      video.play().catch(e => console.error('Play error:', e));
-      setImageLoaded(true);
-    });
-    hls.on(Hls.Events.ERROR, (event, data) => {
-      if (data.fatal) {
-        switch (data.type) {
-          case Hls.ErrorTypes.NETWORK_ERROR:
-            setStreamError('Network error in HLS stream. Reconnecting...');
-            setReconnecting(true);
-            hls.startLoad();  // Force reload for steady recovery
-            break;
-          case Hls.ErrorTypes.MEDIA_ERROR:
-            setStreamError('Media error in HLS stream. Recovering...');
-            hls.recoverMediaError();
-            break;
-          default:
-            setStreamError(`HLS error: ${data.details}. Reconnecting...`);
-            hls.destroy();
-            if (reconnectAttempt.current < MAX_RETRIES) {
-              reconnectAttempt.current += 1;
-              setTimeout(initStream, BASE_RETRY_DELAY * (2 ** reconnectAttempt.current));
-            } else {
-              setStreamError('Max retries reached. Check remote service.');
-              setReconnecting(false);
-            }
-            break;
+	const getStreamUrl = useCallback(() => {
+	  if (!inputSource || (inputSource === 'rtsp' && !rtspUrl)) {
+		setStreamError('Invalid stream parameters: source and rtspUrl (if RTSP) are required.');
+		return null;
+	  }
+	  if (inputSource === 'rtsp' && !/^rtsp:\/\//.test(rtspUrl)) {
+		setStreamError('Invalid RTSP URL: Must start with rtsp://');
+		return null;
+	  }
+	  
+	  //  Base URL without Remote-Parameter in Local-Modus
+	  let base = `${API_URL}/api/video/stream?source=${inputSource}&inferenceServerType=${inferenceServerType}`;
+	  
+	  // Remote-Mode only adds Remote-URL
+	  if (inferenceServerType === 'remote' && remoteInferenceUrl) {
+		const inferencePort = process.env.REACT_APP_INFERENCE_PORT || '8042';
+		const url = new URL(remoteInferenceUrl.startsWith('http') ? remoteInferenceUrl : `https://${remoteInferenceUrl}`);
+		url.port = inferencePort;
+		base += `&remoteInferenceUrl=${encodeURIComponent(url.toString())}`;
+	  }
+	  
+	  if (inputSource === 'rtsp') {
+		base += `&rtspUrl=${encodeURIComponent(rtspUrl)}`;
+	  }
+	  return base + '&t=' + Date.now();
+	}, [inputSource, rtspUrl, inferenceServerType, remoteInferenceUrl]);
+	
+  const initStream = () => {
+    if (status !== 'running' || loading) return;
+    const video = videoRef.current;
+    const url = getStreamUrl() + `&camera_id=${selectedCamera}`;
+    if (!url || !video) return;
+    setImageLoaded(false);
+    setStreamError(null);
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+    }
+    if (Hls.isSupported()) {
+      const hls = new Hls(hlsConfig);
+      hls.loadSource(url);
+      hls.attachMedia(video);
+      hls.on(Hls.Events.MANIFEST_PARSED, () => {
+        video.play().catch(e => console.error('Play error:', e));
+        setImageLoaded(true);
+      });
+      hls.on(Hls.Events.ERROR, (event, data) => {
+        if (data.fatal) {
+          switch (data.type) {
+            case Hls.ErrorTypes.NETWORK_ERROR:
+              setStreamError('Network error in HLS stream. Reconnecting...');
+              setReconnecting(true);
+              hls.startLoad();
+              break;
+            case Hls.ErrorTypes.MEDIA_ERROR:
+              setStreamError('Media error in HLS stream. Recovering...');
+              hls.recoverMediaError();
+              break;
+            default:
+              setStreamError(`HLS error: ${data.details}. Reconnecting...`);
+              hls.destroy();
+              if (reconnectAttempt.current < MAX_RETRIES) {
+                reconnectAttempt.current += 1;
+                setTimeout(initStream, BASE_RETRY_DELAY * (2 ** reconnectAttempt.current));
+              } else {
+                setStreamError('Max retries reached. Check remote service.');
+                setReconnecting(false);
+              }
+              break;
+          }
         }
+      });
+      hlsRef.current = hls;
+      hls.startLoad();
+    } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+      video.src = url;
+      video.addEventListener('loadedmetadata', () => {
+        video.play().catch(e => console.error('Play error:', e));
+        setImageLoaded(true);
+      });
+    } else {
+      setStreamError('HLS not supported in this browser.');
+    }
+    video.addEventListener('error', (e) => {
+      setStreamError('Video error: ' + e.message);
+      if (reconnectAttempt.current < MAX_RETRIES) {
+        reconnectAttempt.current += 1;
+        setTimeout(initStream, BASE_RETRY_DELAY * (2 ** reconnectAttempt.current));
+      } else {
+        setStreamError('Max retries reached. Check remote service.');
+        setReconnecting(false);
       }
     });
-    hlsRef.current = hls;
-    hls.startLoad();  // Added: Explicit start for immediate preloading/upfront data
-  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-    video.src = url;
-    video.addEventListener('loadedmetadata', () => {
-      video.play().catch(e => console.error('Play error:', e));
-      setImageLoaded(true);
-    });
-  } else {
-    setStreamError('HLS not supported in this browser.');
-  }
-  video.addEventListener('error', (e) => {
-    setStreamError('Video error: ' + e.message);
-    if (reconnectAttempt.current < MAX_RETRIES) {
-      reconnectAttempt.current += 1;
-      setTimeout(initStream, BASE_RETRY_DELAY * (2 ** reconnectAttempt.current));
-    } else {
-      setStreamError('Max retries reached. Check remote service.');
-      setReconnecting(false);
-    }
-  });
-  return () => {
-    if (hlsRef.current) hlsRef.current.destroy();
-    video.src = '';
+    return () => {
+      if (hlsRef.current) hlsRef.current.destroy();
+      video.src = '';
+    };
   };
-};
+
   useEffect(() => {
     if (status === 'running' && !loading) {
       initStream();
@@ -559,6 +643,7 @@ const initStream = () => {
       };
     }
   }, [status, loading, fetchLogs, selectedCamera]);
+
   const resizeCanvas = useCallback(() => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
@@ -567,10 +652,12 @@ const initStream = () => {
       canvas.height = video.clientHeight;
     }
   }, []);
+
   useEffect(() => {
     window.addEventListener('resize', resizeCanvas);
     return () => window.removeEventListener('resize', resizeCanvas);
   }, [resizeCanvas]);
+
   const getLedColor = () => {
     switch (status) {
       case 'running': return 'green';
@@ -581,8 +668,7 @@ const initStream = () => {
       default: return 'yellow';
     }
   };
-  
-  
+
   const getStatusChip = () => {
     const color = status === 'running' ? 'success' :
                   status === 'restarting' ? 'warning' : 'error';
@@ -595,6 +681,7 @@ const initStream = () => {
       />
     );
   };
+
   const getLocalHostLedColor = () => {
     switch (localHostStatus) {
       case 'reachable': return 'green';
@@ -602,6 +689,7 @@ const initStream = () => {
       default: return 'yellow';
     }
   };
+
   const getRemoteHostLedColor = () => {
     switch (remoteHostStatus) {
       case 'reachable': return 'green';
@@ -609,6 +697,7 @@ const initStream = () => {
       default: return 'yellow';
     }
   };
+
   return (
     <Box>
       <Typography variant="h6" gutterBottom>
@@ -769,7 +858,7 @@ const initStream = () => {
                 variant="contained"
                 color="primary"
                 onClick={handleStart}
-                disabled={status === 'running' || loading}
+                disabled={status === 'running' || loading || !containerName}
                 sx={{ minWidth: 120 }}
               >
                 {loading ? <CircularProgress size={24} /> : 'Start'}
@@ -778,17 +867,20 @@ const initStream = () => {
                 variant="contained"
                 color="secondary"
                 onClick={handleStop}
-                disabled={status !== 'running' || loading}
+                disabled={status !== 'running' || loading || !containerName}
                 sx={{ minWidth: 120 }}
               >
                 {loading ? <CircularProgress size={24} /> : 'Stop'}
               </Button>
-              <FormControlLabel
-                control={
-                  <Switch checked={showOverlay} onChange={(e) => setShowOverlay(e.target.checked)} disabled={status !== 'running' || loading} />
-                }
-                label="Show Detections"
-              />
+              <Button
+                variant="contained"
+                color="warning"
+                onClick={handleRestart}
+                disabled={status !== 'running' || loading || !containerName}
+                sx={{ minWidth: 120 }}
+              >
+                {loading ? <CircularProgress size={24} /> : 'Restart'}
+              </Button>
               {containerName && (
                 <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                   <Typography variant="body2">
@@ -869,8 +961,8 @@ const initStream = () => {
                   }}
                 />
               </Grid>
-            </Grid>
-          </CardContent>
+			  </Grid>
+            </CardContent>
         </Card>
       )}
       {containerHint && (
@@ -903,7 +995,7 @@ const initStream = () => {
                 <Box sx={{ position: 'relative', width: '100%', maxWidth: '640px' }}>
                   <video
                     ref={videoRef}
-					controls
+                    controls
                     autoPlay
                     muted
                     style={{
@@ -923,7 +1015,7 @@ const initStream = () => {
                       left: 0,
                       width: '100%',
                       height: '100%',
-                      pointerEvents: 'none',  // Allow clicks through to video
+                      pointerEvents: 'none',
                     }}
                   />
                   {reconnecting && (
@@ -1008,4 +1100,5 @@ const initStream = () => {
     </Box>
   );
 };
+
 export default VisualInference;

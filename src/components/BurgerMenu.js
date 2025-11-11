@@ -22,7 +22,7 @@ function BurgerMenu() {
       { label: 'Dojo', path: '/model' },
       { label: 'Analyzer', path: '/analyzer' },
 	  { label: 'Label Studio', path: '/labelstudio' },
-      //{ label: 'Automation', path: '/automation' }
+      { label: 'Automation', path: '/automation' }
     ]
     },
 	{

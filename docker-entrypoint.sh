@@ -1,28 +1,51 @@
 #!/bin/sh
 
-# Check required environment variables
+# ===== CONFIGURATION VALIDATION =====
+echo " Starting WAGO AI Suite Frontend..."
+
+# SERVER_NAME: Host für Grafana, Jupyter, Node-RED (PFLICHT)
 if [ -z "$SERVER_NAME" ]; then
-  echo "Error: SERVER_NAME is not set"
+  echo "   ERROR: SERVER_NAME is required!"
+  echo "   Example: SERVER_NAME=192.168.2.17"
+  echo "   This is the IP where Grafana, Jupyter, Node-RED run."
   exit 1
 fi
 
-# Check required environment variables
-if [ -z "$REACT_APP_N8N_REST_API_KEY" ]; then
-  echo "Error: REACT_APP_N8N_REST_API_KEY is not set"
-  exit 1
-fi
-
-# Check required environment variables
+# INFERENCE_URL: Host für Inference Server (Default = SERVER_NAME)
 if [ -z "$INFERENCE_URL" ]; then
-  echo "Error: INFERENCE_URL is not set"
-  exit 1
+  echo "   INFERENCE_URL not set. Using SERVER_NAME: $SERVER_NAME"
+  INFERENCE_URL="$SERVER_NAME"
 fi
 
-# Substitute environment variables into the NGINX configuration template
-envsubst '$SERVER_NAME $REACT_APP_N8N_REST_API_KEY $INFERENCE_URL' < /etc/nginx/conf.d/default.conf.template > /etc/nginx/conf.d/default.conf
+# N8N API Key (Optional)
+if [ -z "$REACT_APP_N8N_REST_API_KEY" ]; then
+  echo "   REACT_APP_N8N_REST_API_KEY not set. Using default."
+  REACT_APP_N8N_REST_API_KEY="default-key"
+fi
 
-# Log the configuration details
-echo "NGINX configuration generated with SERVER_NAME=$SERVER_NAME and INFERENCE_URL=$INFERENCE_URL"
+# ===== CONFIGURATION SUMMARY =====
+echo ""
+echo "   Configuration:"
+echo "   SERVER_NAME:     $SERVER_NAME (Grafana, Jupyter, Node-RED)"
+echo "   INFERENCE_URL:   $INFERENCE_URL (Inference Server)"
+echo "   N8N_API_KEY:     [SET]"
+echo ""
 
-# Start NGINX in the foreground
-nginx -g "daemon off;"
+# ===== NGINX CONFIG GENERATION =====
+envsubst '$SERVER_NAME $INFERENCE_URL $REACT_APP_N8N_REST_API_KEY' \
+  < /etc/nginx/conf.d/default.conf.template \
+  > /etc/nginx/conf.d/default.conf
+
+# ===== NGINX CONFIG TEST =====
+echo "   Testing NGINX configuration..."
+nginx -t
+
+if [ $? -eq 0 ]; then
+  echo "  NGINX config valid. Starting NGINX..."
+  exec nginx -g "daemon off;"
+else
+  echo "    NGINX config test failed!"
+  echo "    Generated config:"
+  cat /etc/nginx/conf.d/default.conf
+  exit 1
+fi
