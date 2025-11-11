@@ -1775,6 +1775,7 @@ The YOLOv5m helmet detection model is deeply integrated into the AI Suite ecosys
 
 
 ---
+``` bash 
 
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Data Flow Architecture                        │
@@ -1808,6 +1809,8 @@ Real-time Monitoring & Actions
 ├─ Notification systems (email, SMS, Slack)
 ├─ Incident logging
 └─ Safety report generation
+
+```
 
 
 #### Key Integration Points
@@ -1959,6 +1962,7 @@ To train your own variant of the model:
 - Aggregate results in Node-RED for centralized monitoring
 
 #### Repository Structure
+``` bash
 yolov5m-helmet-wago/
 ├── models/
 │   ├── yolov5m-helmet-wago_20251014_183320.hef  # Hailo optimized model
@@ -1975,7 +1979,7 @@ yolov5m-helmet-wago/
 ├── notebooks/
 │   └── model_evaluation.ipynb                    # Performance analysis
 └── README.md                                      # Detailed documentation
-
+```
 
 **Built with ❤️ for Edge AI Applications**
 
