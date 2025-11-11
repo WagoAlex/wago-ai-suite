@@ -1,6 +1,6 @@
 # WAGO AI Suite
 
-> Enterprise-grade AI application suite optimized for edge deployment with local inference capabilities
+> AI application suite optimized for edge deployment with local inference capabilities
 
 [![License: MPL 2.0](https://img.shields.io/badge/License-MPL%202.0-brightgreen.svg)](https://opensource.org/licenses/MPL-2.0)
 [![Docker](https://img.shields.io/badge/docker-ready-blue.svg)](https://www.docker.com/)
@@ -1746,8 +1746,236 @@ SERVER_NAME=192.168.1.100
 
 ## 📚 Additional Documentation
 
+### YOLOv5 Helmet Detection Model
+
+**Repository**: [github.com/WagoAlex/yolov5m-helmet-wago](https://github.com/WagoAlex/yolov5m-helmet-wago)
+
+This repository contains the custom-trained YOLOv5m model optimized for safety helmet detection in industrial environments, specifically designed for deployment on WAGO edge devices with Hailo-8 AI acceleration.
+
+#### Model Details
+
+**Purpose**: Real-time safety equipment detection for industrial workplace monitoring
+
+**Training Specifications**:
+- **Base Model**: YOLOv5m (medium variant)
+- **Classes Detected**: Safety helmets, human heads without helmets
+- **Training Dataset**: Industrial workplace images with various lighting conditions and angles
+- **Output Format**: Hailo HEF (Hailo Executable Format) for optimized inference
+- **Model File**: `yolov5m-helmet-wago_20251014_183320.hef`
+
+**Performance Metrics**:
+- **Inference Time**: ~12-15ms per frame on Hailo-8
+- **Accuracy**: 85%+ confidence threshold for reliable detection
+- **FPS**: 15-30 frames per second depending on resolution
+- **Power Consumption**: ~2.5W (Hailo-8 accelerator)
+
+#### Integration with WAGO AI Suite
+
+The YOLOv5m helmet detection model is deeply integrated into the AI Suite ecosystem:
+
 
 ---
+
+┌─────────────────────────────────────────────────────────────────┐
+│                    Data Flow Architecture                        │
+└─────────────────────────────────────────────────────────────────┘
+
+Video Input (RTSP/Webcam)
+│
+├─→ Hailo AI Container (wago-hailo:yolov5-latest)
+│   ├─ Model: yolov5m-helmet-wago_20251014_183320.hef
+│   ├─ Preprocessing: 640x640 frame normalization
+│   └─ Inference: Hailo-8 accelerated detection
+│
+Detection Results
+│
+├─→ MQTT Broker (topic: inference/yolov5m-results)
+│   └─ JSON payload with detections, confidence, bounding boxes
+│
+Real-time Monitoring & Actions
+│
+├─→ Node-RED (Workflow Automation)
+│   ├─ Alert generation for non-compliance
+│   ├─ Data transformation and routing
+│   └─ Integration with safety systems
+│
+├─→ Grafana (Visualization)
+│   ├─ Real-time detection dashboards
+│   ├─ Compliance statistics
+│   └─ Historical trend analysis
+│
+└─→ n8n (Workflow Automation)
+├─ Notification systems (email, SMS, Slack)
+├─ Incident logging
+└─ Safety report generation
+
+
+#### Key Integration Points
+
+**1. Hailo AI Service Configuration**
+
+The model is loaded and configured in the Hailo AI container:
+```yaml
+hailo-ai:
+  environment:
+    HEF_PATH: "/local/workspace/yolov5m-helmet-wago_20251014_183320.hef"
+    CONFIDENCE_THRESHOLD: "0.85"
+    MQTT_TOPIC: "inference/yolov5m-results"
+```
+
+**2. MQTT Message Format**
+
+Detection results are published in real-time:
+```json
+{
+  "timestamp": "2024-11-11T15:30:45.123Z",
+  "frame_count": 1542,
+  "detections": [
+    {
+      "class": "helmet",
+      "confidence": 0.92,
+      "bbox": [120, 80, 200, 180],
+      "label": "Safety Helmet Detected"
+    },
+    {
+      "class": "no-helmet", 
+      "confidence": 0.88,
+      "bbox": [450, 100, 550, 220],
+      "label": "No Helmet - Safety Violation"
+    }
+  ],
+  "inference_time_ms": 12.3,
+  "total_detections": 2,
+  "violations": 1
+}
+```
+
+**3. Node-RED Integration**
+
+Example Node-RED flow for helmet detection monitoring:
+```javascript
+// MQTT In Node (Subscribe to inference results)
+Topic: inference/yolov5m-results
+
+// Function Node (Process detections)
+if (msg.payload.violations > 0) {
+    // Extract violation details
+    const violations = msg.payload.detections.filter(d => d.class === "no-helmet");
+    
+    // Create alert message
+    msg.alert = {
+        timestamp: msg.payload.timestamp,
+        violation_count: violations.length,
+        confidence: violations.map(v => v.confidence),
+        camera_id: "camera-01"
+    };
+    
+    return msg;
+}
+
+// MQTT Out / HTTP Request (Send alerts to safety system)
+```
+
+**4. Grafana Dashboards**
+
+Pre-configured dashboard queries for helmet detection monitoring:
+
+- **Real-time Detection Rate**: Detections per minute
+- **Compliance Percentage**: Helmet vs. no-helmet ratio
+- **Violation Heatmap**: Time-based violation patterns
+- **Camera Performance**: FPS, latency, detection accuracy per camera
+
+**5. Label Studio Integration**
+
+Use Label Studio for continuous model improvement:
+
+1. **Data Collection**: Export frames with low-confidence detections
+2. **Re-annotation**: Correct and refine labels in Label Studio
+3. **Dataset Export**: Export in YOLO format for retraining
+4. **Model Retraining**: Use JupyterLab for model fine-tuning
+5. **Deployment**: Convert new model to HEF format and update container
+
+#### Use Cases in Industrial Environments
+
+**Construction Sites**:
+- Enforce hard hat compliance
+- Generate safety reports
+- Alert supervisors of violations in real-time
+
+**Manufacturing Facilities**:
+- Monitor designated PPE zones
+- Track compliance statistics
+- Integrate with access control systems
+
+**Warehouses & Logistics**:
+- High-traffic area monitoring
+- Forklift operation zones
+- Loading dock safety compliance
+
+#### Model Training & Customization
+
+To train your own variant of the model:
+
+1. **Data Collection**:
+   - Use Label Studio for annotation
+   - Minimum 1000+ images with diverse scenarios
+   - Include various helmet types, colors, angles
+
+2. **Training in JupyterLab**:
+```python
+   # Clone YOLOv5 repository
+   !git clone https://github.com/ultralytics/yolov5
+   
+   # Train custom model
+   !python train.py --img 640 --batch 16 --epochs 100 \
+                    --data helmet.yaml --weights yolov5m.pt
+```
+
+3. **Convert to Hailo HEF**:
+   - Export to ONNX format
+   - Use Hailo Dataflow Compiler
+   - Optimize for Hailo-8 architecture
+
+4. **Deploy to AI Suite**:
+   - Copy HEF file to `/docker/tests/`
+   - Update `HEF_PATH` in docker-compose.yml
+   - Restart Hailo AI container
+
+#### Performance Optimization Tips
+
+**Frame Rate Optimization**:
+- Reduce input resolution for higher FPS (480p vs 640p)
+- Adjust `FRAME_RATE` environment variable
+- Use hardware video decoding (RTSP mode)
+
+**Accuracy vs Speed Trade-offs**:
+- Lower `CONFIDENCE_THRESHOLD` for more detections (more false positives)
+- Increase threshold for fewer detections (higher precision)
+- Adjust `NMS_IOU_THRESHOLD` for overlapping detection handling
+
+**Multi-Camera Deployment**:
+- Deploy multiple Hailo AI containers with different camera streams
+- Use MQTT topics to differentiate: `inference/camera-{id}/results`
+- Aggregate results in Node-RED for centralized monitoring
+
+#### Repository Structure
+yolov5m-helmet-wago/
+├── models/
+│   ├── yolov5m-helmet-wago_20251014_183320.hef  # Hailo optimized model
+│   ├── yolov5m.pt                                # PyTorch weights
+│   └── model_info.json                           # Model metadata
+├── datasets/
+│   ├── images/                                   # Training images
+│   ├── labels/                                   # YOLO format annotations
+│   └── data.yaml                                 # Dataset configuration
+├── scripts/
+│   ├── train.py                                  # Training script
+│   ├── export_to_onnx.py                         # Model export
+│   └── hailo_compilation.sh                      # HEF conversion
+├── notebooks/
+│   └── model_evaluation.ipynb                    # Performance analysis
+└── README.md                                      # Detailed documentation
+
 
 **Built with ❤️ for Edge AI Applications**
 
