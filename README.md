@@ -1983,4 +1983,4 @@ yolov5m-helmet-wago/
 
 **Built with ❤️ for Edge AI Applications**
 
-*Version 1.7 - Last Updated: 2024*
+*Version 1.7 - Last Updated: 2025*
