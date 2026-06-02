@@ -56,7 +56,7 @@ services:
         max-file: "1"
 
   wago-label-studio:
-    image: heartexlabs/label-studio:1.20.0
+    image: heartexlabs/label-studio:1.22.0
     container_name: wago-label-studio
     ports:
       - "8080:8080"
