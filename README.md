@@ -267,7 +267,7 @@ services:
   # WAGO AI Suite - Frontend
   # ============================================================================
   wago-ai-suite:
-    image: wagoalex/wago-ai-suite-ui:1.947
+    image: wagoalex/wago-ai-suite-ui:latest
     container_name: wago-ai-suite
     ports:
       - "443:443"
@@ -309,7 +309,7 @@ services:
   # WAGO AI Suite - Backend
   # ============================================================================
   wago-ai-suite-backend:
-    image: wagoalex/wago-ai-suite-backend:1.947
+    image: wagoalex/wago-ai-suite-backend:latest
     container_name: wago-ai-suite-backend
     ports:
       - "3042:3042"
@@ -483,7 +483,7 @@ services:
       FRAME_RATE: "15"
       
       # Detection Thresholds
-      CONFIDENCE_THRESHOLD: "0.85"
+      CONFIDENCE_THRESHOLD: "0.42"
       IOU_THRESHOLD: "0.3"
       NMS_IOU_THRESHOLD: "0.45"
       
@@ -1038,26 +1038,33 @@ Some services in this suite (Grafana and Node-RED) are provided by **WAGO App An
 - YOLOv5 object detection optimized for Hailo-8
 - RTSP stream processing (IP cameras)
 - USB webcam support
-- Real-time inference with HLS streaming
+- MJPEG live stream (~1-3s latency) and HLS buffered stream
 - MQTT result publishing
 - Hardware-accelerated processing
+- Bounding boxes drawn on frames before streaming (visible in both MJPEG and HLS)
 
 **Modes**:
 - **RTSP Mode**: Process IP camera streams
 - **Webcam Mode**: Process USB camera input
 
+**Stream modes** (toggle in the Visual Inference UI):
+- **Live (MJPEG)** - default, ~1-3s latency, served via `/stream/mjpeg/{camera_id}`
+- **Buffered (HLS)** - ~10-15s latency, served via `/video/stream/{camera_id}`
+
 **Configuration**:
 
 ```yaml
-# Switch between modes
+# Switch between input modes
 entrypoint: ["/bin/bash", "entrypoint.sh", "rtsp"]   # or "webcam"
 
 # Key environment variables
-CONFIDENCE_THRESHOLD: "0.85"    # Detection confidence
+CONFIDENCE_THRESHOLD: "0.42"    # Detection confidence (0.42 recommended)
 FRAME_RATE: "15"                # Processing FPS
 MQTT_BROKER: "192.168.2.124"   # Results destination
 MQTT_TOPIC: "inference/yolov5m-results"
 ```
+
+> **Note on `CONFIDENCE_THRESHOLD`**: Values above 0.5 may suppress detections for partially occluded or angled subjects. `0.42` is the recommended default for reliable detection across typical industrial scenes.
 
 **MQTT Output Format**:
 ```json
@@ -1822,7 +1829,7 @@ The model is loaded and configured in the Hailo AI container:
 hailo-ai:
   environment:
     HEF_PATH: "/local/workspace/yolov5m-helmet-wago_20251014_183320.hef"
-    CONFIDENCE_THRESHOLD: "0.85"
+    CONFIDENCE_THRESHOLD: "0.42"
     MQTT_TOPIC: "inference/yolov5m-results"
 ```
 
