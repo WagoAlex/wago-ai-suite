@@ -52,6 +52,7 @@ const VisualInference = ({ inferenceServerType, setInferenceServerType, remoteIn
   const [containerName, setContainerName] = useState('');
   const [streamError, setStreamError] = useState(null);
   const [containerHint, setContainerHint] = useState(null);
+  const [streamMode, setStreamMode] = useState('mjpeg'); // 'hls' | 'mjpeg'
   const logsRef = useRef(null);
   const [thinkingDots, setThinkingDots] = useState('.');
   const videoRef = useRef(null);
@@ -632,17 +633,17 @@ const hlsConfig = {
 
   useEffect(() => {
     if (status === 'running' && !loading) {
-      initStream();
+      if (streamMode === 'hls') initStream();
       const logsInterval = setInterval(fetchLogs, 5000);
       const streamTimeout = setTimeout(() => {
-        if (!imageLoaded) setStreamError('Stream timeout - Check camera or backend logs');
+        if (!imageLoaded && streamMode === 'hls') setStreamError('Stream timeout - Check camera or backend logs');
       }, 120000);
       return () => {
         clearInterval(logsInterval);
         clearTimeout(streamTimeout);
       };
     }
-  }, [status, loading, fetchLogs, selectedCamera]);
+  }, [status, loading, fetchLogs, selectedCamera, streamMode]);
 
   const resizeCanvas = useCallback(() => {
     const video = videoRef.current;
@@ -989,35 +990,40 @@ const hlsConfig = {
           <Box sx={{ position: 'relative', minHeight: '600px' }}>
             {status === 'running' && !loading ? (
               <Box sx={{ p: 2 }}>
-                <Typography variant="subtitle1" sx={{ mb: 1 }}>
-                  Inference Stream{inputSource === 'rtsp' ? ` (Camera ${selectedCamera})` : ''}:
-                </Typography>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                  <Typography variant="subtitle1">
+                    Inference Stream{inputSource === 'rtsp' ? ` (Camera ${selectedCamera})` : ''}:
+                  </Typography>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    onClick={() => setStreamMode(m => m === 'mjpeg' ? 'hls' : 'mjpeg')}
+                  >
+                    {streamMode === 'mjpeg' ? 'Live (MJPEG)' : 'Buffered (HLS)'}
+                  </Button>
+                </Box>
                 <Box sx={{ position: 'relative', width: '100%', maxWidth: '640px' }}>
-                  <video
-                    ref={videoRef}
-                    controls
-                    autoPlay
-                    muted
-                    style={{
-                      width: '100%',
-                      height: 'auto',
-                      maxWidth: '640px',
-                      backgroundColor: 'gray',
-                      borderRadius: '4px',
-                      objectFit: 'contain',
-                    }}
-                  />
-                  <canvas
-                    ref={canvasRef}
-                    style={{
-                      position: 'absolute',
-                      top: 0,
-                      left: 0,
-                      width: '100%',
-                      height: '100%',
-                      pointerEvents: 'none',
-                    }}
-                  />
+                  {streamMode === 'mjpeg' ? (
+                    <img
+                      src={`${API_URL}/api/mjpeg/stream/${selectedCamera}?inferenceServerType=${inferenceServerType}${inferenceServerType === 'remote' && remoteInferenceUrl ? `&remoteInferenceUrl=${encodeURIComponent(remoteInferenceUrl)}` : ''}`}
+                      alt="Live inference stream"
+                      style={{ width: '100%', height: 'auto', maxWidth: '640px', backgroundColor: '#1a1a1a', borderRadius: '4px', objectFit: 'contain', minHeight: '360px' }}
+                    />
+                  ) : (
+                    <>
+                      <video
+                        ref={videoRef}
+                        controls
+                        autoPlay
+                        muted
+                        style={{ width: '100%', height: 'auto', maxWidth: '640px', backgroundColor: 'gray', borderRadius: '4px', objectFit: 'contain' }}
+                      />
+                      <canvas
+                        ref={canvasRef}
+                        style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}
+                      />
+                    </>
+                  )}
                   {reconnecting && (
                     <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
                       Reconnecting stream...
