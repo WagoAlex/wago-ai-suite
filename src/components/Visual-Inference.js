@@ -21,6 +21,7 @@ import {
   Grid,
   InputAdornment,
   IconButton,
+  Slider,
 } from '@mui/material';
 import CloseIcon from '@mui/icons-material/Close';
 import AddIcon from '@mui/icons-material/Add';
@@ -63,6 +64,7 @@ const VisualInference = ({ inferenceServerType, setInferenceServerType, remoteIn
   const [imageLoaded, setImageLoaded] = useState(false);
   const [canvasDimensions, setCanvasDimensions] = useState({ width: 640, height: 640 });
   const [parseError, setParseError] = useState(null);
+  const [confidenceThreshold, setConfidenceThreshold] = useState(0);
   const [reconnecting, setReconnecting] = useState(false);
   const lastGoodDataURL = useRef(null);
   const streamTimestamp = useRef(Date.now());
@@ -1001,6 +1003,23 @@ const hlsConfig = {
                   >
                     {streamMode === 'mjpeg' ? 'Live (MJPEG)' : 'Buffered (HLS)'}
                   </Button>
+                </Box>
+                <Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 1, maxWidth: 400 }}>
+                  <Typography variant="body2" sx={{ whiteSpace: 'nowrap' }}>
+                    Min confidence: {(confidenceThreshold * 100).toFixed(0)}%
+                  </Typography>
+                  <Slider
+                    size="small"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={confidenceThreshold}
+                    onChange={(_, v) => setConfidenceThreshold(v)}
+                    sx={{ flex: 1 }}
+                  />
+                  <Typography variant="body2" color="text.secondary" sx={{ whiteSpace: 'nowrap' }}>
+                    {detections.filter(d => d.confidence >= confidenceThreshold).length} det
+                  </Typography>
                 </Box>
                 <Box sx={{ position: 'relative', width: '100%', maxWidth: '640px' }}>
                   {streamMode === 'mjpeg' ? (
